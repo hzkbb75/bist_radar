@@ -1,217 +1,144 @@
 import os
-import io
-import re
 import json
 import requests
 import pandas as pd
 from datetime import datetime
-import xml.etree.ElementTree as ET
-from bs4 import BeautifulSoup
 
-# Ortam Değişkenleri
-ONEDRIVE_LINK = os.getenv("ONEDRIVE_SHARE_LINK")
+# ==========================================
+# AYARLAR VE ÇEVRE DEĞİŞKENLERİ
+# ==========================================
 MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
+ONEDRIVE_EXCEL_URL = os.getenv("ONEDRIVE_EXCEL_URL")  # OneDrive doğrudan indirme linki (download=1 parametreli)
+STATE_FILE = "son_bildirimler.json"
 
-# TEST İÇİN: "ANALIZ" kelimesi eklendi (Haberin yakalanması için)
-KRITIK_KATEGORILER = [
-    "ANALIZ",
-    "YENI IS ILISKISI",
-    "FINANSAL DURAN VARLIK",
-    "OZEL DURUM ACIKLAMASI",
-    "IHALE",
-    "PAY ALIM SATIM",
-    "SERMAYE ARTIRIMI",
-    "TEMETTU",
-    "KAR PAYI",
-    "YATIRIM TESVIK",
-    "KAPASITE ARTISI"
-]
+# KAP API Endpoint'i (Son bildirimler)
+KAP_API_URL = "https://www.kap.org.tr/tr/api/disclosures"
 
-def normalize_tr(metin):
-    """Türkçe karakterleri güvenli büyük harfe çevirir."""
-    if not metin:
-        return ""
-    text = str(metin)
-    tr_map = {
-        "İ": "I", "ı": "I", "i": "I",
-        "ğ": "G", "Ğ": "G",
-        "ü": "U", "Ü": "U",
-        "ş": "S", "Ş": "S",
-        "ö": "O", "Ö": "O",
-        "ç": "C", "Ç": "C"
-    }
-    for k, v in tr_map.items():
-        text = text.replace(k, v)
-    return text.upper()
-
-def download_excel_file(sharing_url):
-    """OneDrive linkini doğrudan indirilebilir dosya akışına çevirir."""
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    })
-
-    separator = "&" if "?" in sharing_url else "?"
-    download_url = f"{sharing_url}{separator}download=1" if "download=1" not in sharing_url else sharing_url
-
-    resp = session.get(download_url, allow_redirects=True, timeout=30)
-    resp.raise_for_status()
-
-    if "html" in resp.headers.get("Content-Type", "").lower() and "view.aspx" in resp.url:
-        direct_url = resp.url.replace("view.aspx", "download.aspx")
-        resp = session.get(direct_url, allow_redirects=True, timeout=30)
-        resp.raise_for_status()
-
-    return resp.content
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.kap.org.tr/",
+    "Accept": "application/json, text/plain, */*"
+}
 
 def get_open_positions():
-    """Excel İşlem_Günlüğü sayfasından AÇIK hisseleri çeker."""
-    if not ONEDRIVE_LINK:
-        print("HATA: ONEDRIVE_SHARE_LINK tanımlanmamış.")
+    """OneDrive üzerindeki Excel'den açık pozisyondaki hisse sembollerini çeker."""
+    if not ONEDRIVE_EXCEL_URL:
+        print("UYARI: ONEDRIVE_EXCEL_URL tanımlı değil!")
+        return set()
+    
+    try:
+        # Excel dosyasını doğrudan indirip oku
+        df = pd.read_excel(ONEDRIVE_EXCEL_URL)
+        
+        # 'Hisse' veya 'Sembol' kolonunu tespit et
+        col_name = None
+        for col in df.columns:
+            if str(col).strip().upper() in ["HISSE", "SEMBOL", "HİSSE", "TICKER", "KOD"]:
+                col_name = col
+                break
+        
+        if not col_name:
+            col_name = df.columns[0]  # Bulamazsa ilk sütunu baz alır
+            
+        semboller = set(df[col_name].dropna().astype(str).str.strip().str.upper())
+        print(f"Takip edilecek portföy hisseleri ({len(semboller)} adet): {', '.join(semboller)}")
+        return semboller
+    except Exception as e:
+        print(f"OneDrive Excel okuma hatası: {e}")
+        return set()
+
+def load_seen_ids():
+    """Daha önce Telegram'a gönderilmiş bildirim ID'lerini yükler."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
+    return set()
+
+def save_seen_ids(seen_ids):
+    """İşlenen bildirim ID'lerini kaydeder (Maksimum son 500 ID saklanır)."""
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(seen_ids)[-500:], f, ensure_ascii=False, indent=2)
+
+def fetch_kap_disclosures():
+    """KAP üzerinden son bildirimleri çeker."""
+    try:
+        response = requests.get(KAP_API_URL, headers=HEADERS, timeout=20)
+        if response.status_code == 200:
+            return response.json()
+        print(f"KAP API hatası: HTTP {response.status_code}")
+        return []
+    except Exception as e:
+        print(f"KAP bağlantı hatası: {e}")
         return []
 
-    content = download_excel_file(ONEDRIVE_LINK)
-    excel_file = io.BytesIO(content)
-    df = pd.read_excel(excel_file, sheet_name="İşlem_Günlüğü", engine="openpyxl")
-    df.columns = [str(c).strip() for c in df.columns]
+def send_to_make(payload):
+    """Eşleşen bildirimi Make.com Webhook'una iletir."""
+    if not MAKE_WEBHOOK_URL:
+        print("HATA: MAKE_WEBHOOK_URL tanımlı değil!")
+        return False
+    try:
+        res = requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=15)
+        return res.status_code == 200
+    except Exception as e:
+        print(f"Make.com Webhook gönderim hatası: {e}")
+        return False
 
-    print(f"Excel toplam satır sayısı: {len(df)}")
-
-    def durum_acik_mi(deger):
-        val = normalize_tr(deger)
-        return "ACIK" in val
-
-    acik_mask = df["Pozisyon Durumu"].apply(durum_acik_mi)
-    acik_hisseler = df.loc[acik_mask, "Hisse"].dropna().unique().tolist()
-    return [normalize_tr(h).strip() for h in acik_hisseler]
-
-def is_critical_disclosure(title):
-    """Bildirim başlığında kritik anahtar kelimeler var mı denetler."""
-    norm = normalize_tr(title)
-    return any(kelime in norm for kelime in KRITIK_KATEGORILER)
-
-def fetch_live_kap_disclosures():
-    """Engelsiz Borsa ve KAP haber akışını çeker."""
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "*/*"
-    })
-
-    items = []
-    seen = set()
-
-    rss_urls = [
-        "https://finans.mynet.com/borsa/rss/",
-        "https://finans.mynet.com/haber/rss/kategori/borsa/"
-    ]
-
-    for r_url in rss_urls:
-        try:
-            r = session.get(r_url, timeout=15)
-            if r.status_code == 200:
-                root = ET.fromstring(r.content)
-                for item in root.findall(".//item"):
-                    title = item.findtext("title", "")
-                    link = item.findtext("link", "")
-                    if title and link not in seen:
-                        seen.add(link)
-                        items.append({
-                            "id": link.rstrip("/").split("/")[-1],
-                            "title": title,
-                            "link": link
-                        })
-        except Exception as e:
-            print(f"RSS denemesi geçildi ({r_url}): {e}")
-
-    if len(items) == 0:
-        try:
-            web_url = "https://finans.mynet.com/borsa/haber/kap-haberleri/"
-            r = session.get(web_url, timeout=15)
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, "html.parser")
-                for a in soup.find_all("a", href=True):
-                    href = a["href"].strip()
-                    title = a.get_text(strip=True)
-                    if ("/borsa/haber/" in href or "kap" in href.lower()) and len(title) > 15:
-                        if not href.startswith("http"):
-                            href = f"https://finans.mynet.com{href}"
-                        if href not in seen:
-                            seen.add(href)
-                            items.append({
-                                "id": href.rstrip("/").split("/")[-1],
-                                "title": title,
-                                "link": href
-                            })
-        except Exception as ex:
-            print(f"Web kazıma denemesi geçildi: {ex}")
-
-    print(f"Haber akışından toplam {len(items)} adet güncel piyasa/KAP bildirimi çekildi.")
-    return items
-
-def run_kap_scanner():
-    acik_hisseler = get_open_positions()
-    print(f"Takip Edilen Açık Pozisyonlar: {acik_hisseler}")
-
-    if not acik_hisseler:
-        print("Portföyde açık hisse bulunamadı veya liste boş. Tarama tamamlandı.")
+def main():
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Canlı KAP taraması başlatıldı.")
+    
+    portfoy_sembolleri = get_open_positions()
+    if not portfoy_sembolleri:
+        print("Açık pozisyon bulunamadı veya liste çekilemedi. Tarama sonlandırılıyor.")
         return
 
-    # TEST İÇİN: Hafıza kontrolünü kapattık, haberi doğrudan yakalasın
-    cache_file = "son_bildirimler.json"
-    sent_ids = []
-
-    new_sent_ids = []
-    disclosures = fetch_live_kap_disclosures()
-
-    if not disclosures:
-        print("Haber akışından bildirim alınamadı.")
-        return
-
-    for item in disclosures:
-        disc_id = str(item["id"])
-        title = item["title"]
-        link = item["link"]
-        title_norm = normalize_tr(title)
-
-        # Açık hisseyle eşleşme kontrolü
-        eslesen_hisse = None
-        for hisse in acik_hisseler:
-            if re.search(rf"\b{re.escape(hisse)}\b", title_norm):
-                eslesen_hisse = hisse
-                break
-
-        if not eslesen_hisse:
+    seen_ids = load_seen_ids()
+    bildirimler = fetch_kap_disclosures()
+    
+    yeni_sayac = 0
+    for item in bildirimler:
+        # KAP JSON yapısından verileri ayıkla
+        disclosure = item.get("basic", {}) if "basic" in item else item
+        
+        bildirim_id = str(disclosure.get("disclosureIndex") or disclosure.get("id") or "")
+        sembol = str(disclosure.get("stockCodes") or disclosure.get("companyOid") or "").strip().upper()
+        baslik = disclosure.get("title") or disclosure.get("disclosureType") or "KAP Bildirimi"
+        zaman = disclosure.get("publishDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
+        
+        # ID yoksa veya daha önce gönderildiyse atla
+        if not bildirim_id or bildirim_id in seen_ids:
             continue
+            
+        # Birden fazla hisse kodu virgülle gelebilir (örn: THYAO, PGSUS)
+        ilgili_hisseler = [s.strip() for s in sembol.replace(";", ",").split(",") if s.strip()]
+        
+        # Portföyümüzdeki hisselerle eşleşme kontrolü
+        eslesen = any(h in portfoy_sembolleri for h in ilgili_hisseler)
+        
+        if eslesen:
+            kap_link = f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
+            
+            payload = {
+                "sembol": sembol,
+                "baslik": baslik,
+                "zaman": zaman,
+                "kap_link": kap_link,
+                "ozet": disclosure.get("summary") or baslik
+            }
+            
+            print(f"Eşleşme bulundu: {sembol} - {baslik}")
+            basarili = send_to_make(payload)
+            if basarili:
+                seen_ids.add(bildirim_id)
+                yeni_sayac += 1
+        else:
+            # Portföy dışı bildirimleri de tekrar kontrol etmemek için hafızaya al
+            seen_ids.add(bildirim_id)
 
-        print(f"Açık hisseyle eşleşti: {eslesen_hisse} -> {title}")
-
-        # Kritik filtre kontrolü
-        if not is_critical_disclosure(title):
-            print(f"Elenen rutin bildirim: {eslesen_hisse} - {title}")
-            continue
-
-        # Make.com'a gönder
-        payload = {
-            "disclosure_id": disc_id,
-            "sembol": eslesen_hisse,
-            "baslik": title,
-            "ozet": title,
-            "kap_link": link,
-            "zaman": datetime.now().strftime("%Y-%m-%d %H:%M")
-        }
-
-        if MAKE_WEBHOOK_URL:
-            try:
-                requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=15)
-                print(f"KRİTİK BİLDİRİM İLETİLDİ: {eslesen_hisse} - {title}")
-            except Exception as ex:
-                print(f"Webhook hatası: {ex}")
-
-        new_sent_ids.append(disc_id)
-
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(new_sent_ids[-300:], f, ensure_ascii=False, indent=2)
+    save_seen_ids(seen_ids)
+    print(f"Tarama tamamlandı. {yeni_sayac} adet yeni bildirim Telegram'a aktarıldı.")
 
 if __name__ == "__main__":
-    run_kap_scanner()
+    main()
