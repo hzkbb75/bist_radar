@@ -56,7 +56,18 @@ def get_open_positions():
     df = pd.read_excel(excel_file, sheet_name="İşlem_Günlüğü", engine="openpyxl")
     df.columns = [str(c).strip() for c in df.columns]
 
-    acik_mask = df["Pozisyon Durumu"].astype(str).str.strip().str.upper() == "AÇIK"
+    # Hata ayıklama: Excel'den gelen ilk satırları konsola yazdır
+    print(f"Excel toplam satır sayısı: {len(df)}")
+    if "Hisse" in df.columns and "Pozisyon Durumu" in df.columns:
+        print("Excel'den okunan ilk kayıtlar:")
+        print(df[["Hisse", "Pozisyon Durumu"]].dropna(how="all").head())
+
+    # Türkçe karakter ve yazım toleranslı eşleştirme
+    def durum_acik_mi(deger):
+        val = str(deger).strip().upper().replace("İ", "I").replace("Ç", "C")
+        return "ACIK" in val
+
+    acik_mask = df["Pozisyon Durumu"].apply(durum_acik_mi)
     acik_hisseler = df.loc[acik_mask, "Hisse"].dropna().unique().tolist()
     return [str(h).strip().upper() for h in acik_hisseler]
 
