@@ -8,7 +8,6 @@ from datetime import datetime
 
 # ==========================================
 # AYARLAR VE ÇEVRE DEĞİŞKENLERİ
-# (Secrets tanımlı olmasa veya boş gelse bile linki garantiye alan 'or' yapısı)
 # ==========================================
 MAKE_WEBHOOK_URL = (
     os.getenv("MAKE_WEBHOOK_URL") 
@@ -53,15 +52,8 @@ FILTRE_KELIMELER = [
     "devralma"
 ]
 
-KAP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://www.kap.org.tr/"
-}
-
 def download_excel_file(url):
-    """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir (Orijinal çalışan sürüm)."""
+    """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir."""
     session = requests.Session()
     target_url = url if "download=1" in url else f"{url}&download=1"
     
@@ -79,7 +71,7 @@ def download_excel_file(url):
         if res_live.content.startswith(b'PK'):
             return res_live.content
     except Exception as e:
-        print(f"Excel indirme denemesi sırasında hata: {e}")
+        print(f"Excel indirme hatası: {e}")
 
     return None
 
@@ -143,27 +135,80 @@ def load_seen_ids():
     return set()
 
 def save_seen_ids(seen_ids):
-    """İşlenen bildirim ID'lerini kaydeder (Son 1000 ID saklanır)."""
+    """İşlenen bildirim ID'lerini kaydeder (Son 1000 ID)."""
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen_ids)[-1000:], f, ensure_ascii=False, indent=2)
 
-def fetch_company_disclosures(session, hisse_kodu):
-    """Belirli bir hissenin bildirimlerini çeker."""
-    url = "https://www.kap.org.tr/tr/api/disclosures"
-    params = {"stockCodes": hisse_kodu}
-    
-    for attempt in range(1, 3):
-        try:
-            res = session.get(url, params=params, headers=KAP_HEADERS, timeout=20)
-            if res.status_code == 200:
-                data = res.json()
-                if isinstance(data, list):
-                    return data
-            print(f"[{hisse_kodu}] KAP yanıtı: HTTP {res.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"[{hisse_kodu}] Bağlantı denemesi ({attempt}/2): {e}")
-            time.sleep(2)
-            
+def fetch_from_bigpara(session, hisse):
+    """Bigpara üzerinden hissenin son KAP bildirimlerini çeker."""
+    url = f"https://bigpara.hurriyet.com.tr/api/v1/hisse/kaphaberleri/{hisse}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://bigpara.hurriyet.com.tr/"
+    }
+    res = session.get(url, headers=headers, timeout=12)
+    if res.status_code == 200:
+        data = res.json()
+        raw_list = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        sonuclar = []
+        for d in raw_list:
+            b_id = str(d.get("id") or d.get("disclosureIndex") or "")
+            if not b_id:
+                continue
+            sonuclar.append({
+                "id": b_id,
+                "symbol": hisse,
+                "title": d.get("title") or d.get("baslik") or "KAP Bildirimi",
+                "date": d.get("date") or d.get("tarih") or datetime.now().strftime("%d.%m.%Y %H:%M"),
+                "summary": d.get("spot") or d.get("ozet") or d.get("title") or "",
+                "link": d.get("url") or f"https://www.kap.org.tr/tr/Bildirim/{b_id}"
+            })
+        return sonuclar
+    return []
+
+def fetch_from_tradingview(session, hisse):
+    """TradingView BIST akışı üzerinden KAP bildirimlerini çeker (Yedek kaynak)."""
+    url = f"https://news-headlines.tradingview.com/v2/headlines?lang=tr&symbol=BIST%3A{hisse}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36"
+    }
+    res = session.get(url, headers=headers, timeout=12)
+    if res.status_code == 200:
+        data = res.json()
+        items = data.get("items", []) if isinstance(data, dict) else []
+        sonuclar = []
+        for it in items:
+            b_id = str(it.get("id") or "")
+            pub_ts = it.get("published")
+            pub_str = datetime.fromtimestamp(pub_ts).strftime("%d.%m.%Y %H:%M") if pub_ts else datetime.now().strftime("%d.%m.%Y %H:%M")
+            link = it.get("link") or (f"https://www.tradingview.com{it.get('storyPath')}" if it.get("storyPath") else "")
+            sonuclar.append({
+                "id": b_id,
+                "symbol": hisse,
+                "title": it.get("title") or "KAP Bildirimi",
+                "date": pub_str,
+                "summary": it.get("shortDescription") or it.get("title") or "",
+                "link": link
+            })
+        return sonuclar
+    return []
+
+def fetch_company_disclosures(session, hisse):
+    """Bulut sunucularını engellemeyen kaynaklardan sırayla bildirim çeker."""
+    try:
+        veriler = fetch_from_bigpara(session, hisse)
+        if veriler:
+            return veriler
+    except Exception as e:
+        print(f"[{hisse}] Bigpara sorgusu geçildi: {e}")
+
+    try:
+        veriler = fetch_from_tradingview(session, hisse)
+        if veriler:
+            return veriler
+    except Exception as e:
+        print(f"[{hisse}] TradingView sorgusu geçildi: {e}")
+
     return []
 
 def send_to_make(payload):
@@ -181,8 +226,8 @@ def filtreye_uyuyor_mu(baslik, ozet):
     """Başlık veya özet metninde 5 kritik gruptan biri geçiyor mu kontrol eder."""
     if not FILTRE_KELIMELER:
         return True
-    birlesik_metin = f"{baslik} {ozet}".lower()
-    return any(kelime in birlesik_metin for kelime in FILTRE_KELIMELER)
+    birlesik = f"{baslik} {ozet}".lower()
+    return any(k in birlesik for k in FILTRE_KELIMELER)
 
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Şirket bazlı KAP taraması başlatıldı.")
@@ -201,24 +246,22 @@ def main():
         bildirimler = fetch_company_disclosures(session, hisse)
         
         for item in bildirimler:
-            disclosure = item.get("basic", {}) if "basic" in item else item
-            
-            bildirim_id = str(disclosure.get("disclosureIndex") or disclosure.get("id") or "")
-            sembol = str(disclosure.get("stockCodes") or disclosure.get("companyOid") or hisse).strip().upper()
-            baslik = disclosure.get("title") or disclosure.get("disclosureType") or "KAP Bildirimi"
-            zaman = disclosure.get("publishDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
-            ozet = str(disclosure.get("summary") or baslik).strip()
+            bildirim_id = str(item.get("id") or "")
+            sembol = str(item.get("symbol") or hisse).strip().upper()
+            baslik = item.get("title") or "KAP Bildirimi"
+            zaman = item.get("date") or datetime.now().strftime("%d.%m.%Y %H:%M")
+            ozet = str(item.get("summary") or baslik).strip()
+            link = item.get("link") or f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
 
             if not bildirim_id or bildirim_id in seen_ids:
                 continue
 
             if filtreye_uyuyor_mu(baslik, ozet):
-                kap_link = f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
                 payload = {
                     "sembol": sembol,
                     "baslik": baslik,
                     "zaman": zaman,
-                    "kap_link": kap_link,
+                    "kap_link": link,
                     "ozet": ozet
                 }
                 print(f"  [KRİTİK BİLDİRİM] {sembol}: {baslik}")
