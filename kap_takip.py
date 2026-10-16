@@ -12,8 +12,9 @@ from bs4 import BeautifulSoup
 ONEDRIVE_LINK = os.getenv("ONEDRIVE_SHARE_LINK")
 MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-# Kritik Bildirim Filtresi
+# TEST İÇİN: "ANALIZ" kelimesi eklendi (Haberin yakalanması için)
 KRITIK_KATEGORILER = [
+    "ANALIZ",
     "YENI IS ILISKISI",
     "FINANSAL DURAN VARLIK",
     "OZEL DURUM ACIKLAMASI",
@@ -100,7 +101,6 @@ def fetch_live_kap_disclosures():
     items = []
     seen = set()
 
-    # 1. Kaynak: Mynet Finans Borsa RSS Beslemesi
     rss_urls = [
         "https://finans.mynet.com/borsa/rss/",
         "https://finans.mynet.com/haber/rss/kategori/borsa/"
@@ -124,7 +124,6 @@ def fetch_live_kap_disclosures():
         except Exception as e:
             print(f"RSS denemesi geçildi ({r_url}): {e}")
 
-    # 2. Kaynak: Mynet KAP Haberleri Mobil Sayfası
     if len(items) == 0:
         try:
             web_url = "https://finans.mynet.com/borsa/haber/kap-haberleri/"
@@ -148,9 +147,6 @@ def fetch_live_kap_disclosures():
             print(f"Web kazıma denemesi geçildi: {ex}")
 
     print(f"Haber akışından toplam {len(items)} adet güncel piyasa/KAP bildirimi çekildi.")
-    if items:
-        print("Örnek son haber başlığı:", items[0]["title"])
-
     return items
 
 def run_kap_scanner():
@@ -161,30 +157,24 @@ def run_kap_scanner():
         print("Portföyde açık hisse bulunamadı veya liste boş. Tarama tamamlandı.")
         return
 
+    # TEST İÇİN: Hafıza kontrolünü kapattık, haberi doğrudan yakalasın
     cache_file = "son_bildirimler.json"
     sent_ids = []
-    if os.path.exists(cache_file):
-        with open(cache_file, "r", encoding="utf-8") as f:
-            try:
-                sent_ids = json.load(f)
-            except Exception:
-                sent_ids = []
 
-    new_sent_ids = list(sent_ids)
+    new_sent_ids = []
     disclosures = fetch_live_kap_disclosures()
 
     if not disclosures:
         print("Haber akışından bildirim alınamadı.")
         return
 
-    eslesen_sayisi = 0
     for item in disclosures:
         disc_id = str(item["id"])
         title = item["title"]
         link = item["link"]
         title_norm = normalize_tr(title)
 
-        # Açık pozisyon hisselerinden biriyle eşleşme kontrolü
+        # Açık hisseyle eşleşme kontrolü
         eslesen_hisse = None
         for hisse in acik_hisseler:
             if re.search(rf"\b{re.escape(hisse)}\b", title_norm):
@@ -194,17 +184,14 @@ def run_kap_scanner():
         if not eslesen_hisse:
             continue
 
-        eslesen_sayisi += 1
         print(f"Açık hisseyle eşleşti: {eslesen_hisse} -> {title}")
 
-        if disc_id in sent_ids:
-            continue
-
+        # Kritik filtre kontrolü
         if not is_critical_disclosure(title):
             print(f"Elenen rutin bildirim: {eslesen_hisse} - {title}")
-            new_sent_ids.append(disc_id)
             continue
 
+        # Make.com'a gönder
         payload = {
             "disclosure_id": disc_id,
             "sembol": eslesen_hisse,
@@ -222,9 +209,6 @@ def run_kap_scanner():
                 print(f"Webhook hatası: {ex}")
 
         new_sent_ids.append(disc_id)
-
-    if eslesen_sayisi == 0:
-        print(f"Piyasa akışındaki haberlerde takip edilen {acik_hisseler} koduna ait yeni haber bulunamadı.")
 
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(new_sent_ids[-300:], f, ensure_ascii=False, indent=2)
