@@ -5,12 +5,14 @@ import json
 import requests
 import pandas as pd
 from datetime import datetime
+import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
 
 # Ortam Değişkenleri
 ONEDRIVE_LINK = os.getenv("ONEDRIVE_SHARE_LINK")
 MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-# Türkçe karakter uyumlu kritik kategori listesi
+# Kritik Bildirim Filtresi
 KRITIK_KATEGORILER = [
     "YENI IS ILISKISI",
     "FINANSAL DURAN VARLIK",
@@ -88,58 +90,66 @@ def is_critical_disclosure(title):
     return any(kelime in norm for kelime in KRITIK_KATEGORILER)
 
 def fetch_live_kap_disclosures():
-    """Engelsiz Mynet Finans anlık KAP JSON API akışından bildirimleri çeker."""
-    url = "https://finans.mynet.com/borsa/haber/kap-haberleri/api/list"
-    headers = {
+    """Engelsiz Borsa ve KAP haber akışını çeker."""
+    session = requests.Session()
+    session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://finans.mynet.com/borsa/haber/kap-haberleri/"
-    }
-    
-    items = []
-    try:
-        r = requests.get(url, headers=headers, timeout=20)
-        if r.status_code == 200:
-            data = r.json()
-            raw_items = data.get("data", []) if isinstance(data, dict) else data
-            
-            for d in raw_items:
-                disc_id = str(d.get("id") or d.get("kapId") or d.get("disclosureId") or "")
-                title = d.get("title") or d.get("header") or d.get("subject") or ""
-                stock = d.get("stockCode") or d.get("code") or ""
-                link = d.get("url") or f"https://www.kap.org.tr/tr/Bildirim/{disc_id}"
-                
-                if title:
-                    items.append({
-                        "id": disc_id if disc_id else title,
-                        "title": title,
-                        "stock": normalize_tr(stock),
-                        "link": link
-                    })
-            print(f"Canlı API üzerinden {len(items)} adet KAP bildirimi başarıyla çekildi.")
-            if items:
-                print("Son bildirim örneği:", items[0]["title"])
-            return items
-    except Exception as e:
-        print(f"Mynet API çağrısında hata: {e}")
+        "Accept": "*/*"
+    })
 
-    # Alternatif Açık Uç Nokta (Yedek Besleme)
-    try:
-        alt_url = "https://bigpara.hurriyet.com.tr/api/v1/kap/news"
-        r = requests.get(alt_url, headers=headers, timeout=20)
-        if r.status_code == 200:
-            alt_data = r.json().get("data", [])
-            for d in alt_data:
-                items.append({
-                    "id": str(d.get("id", "")),
-                    "title": d.get("title", ""),
-                    "stock": normalize_tr(d.get("stockCode", "")),
-                    "link": d.get("url", "")
-                })
-            print(f"Yedek API üzerinden {len(items)} adet KAP bildirimi çekildi.")
-            return items
-    except Exception as ex:
-        print(f"Yedek API hatası: {ex}")
+    items = []
+    seen = set()
+
+    # 1. Kaynak: Mynet Finans Borsa RSS Beslemesi
+    rss_urls = [
+        "https://finans.mynet.com/borsa/rss/",
+        "https://finans.mynet.com/haber/rss/kategori/borsa/"
+    ]
+
+    for r_url in rss_urls:
+        try:
+            r = session.get(r_url, timeout=15)
+            if r.status_code == 200:
+                root = ET.fromstring(r.content)
+                for item in root.findall(".//item"):
+                    title = item.findtext("title", "")
+                    link = item.findtext("link", "")
+                    if title and link not in seen:
+                        seen.add(link)
+                        items.append({
+                            "id": link.rstrip("/").split("/")[-1],
+                            "title": title,
+                            "link": link
+                        })
+        except Exception as e:
+            print(f"RSS denemesi geçildi ({r_url}): {e}")
+
+    # 2. Kaynak: Mynet KAP Haberleri Mobil Sayfası
+    if len(items) == 0:
+        try:
+            web_url = "https://finans.mynet.com/borsa/haber/kap-haberleri/"
+            r = session.get(web_url, timeout=15)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    href = a["href"].strip()
+                    title = a.get_text(strip=True)
+                    if ("/borsa/haber/" in href or "kap" in href.lower()) and len(title) > 15:
+                        if not href.startswith("http"):
+                            href = f"https://finans.mynet.com{href}"
+                        if href not in seen:
+                            seen.add(href)
+                            items.append({
+                                "id": href.rstrip("/").split("/")[-1],
+                                "title": title,
+                                "link": href
+                            })
+        except Exception as ex:
+            print(f"Web kazıma denemesi geçildi: {ex}")
+
+    print(f"Haber akışından toplam {len(items)} adet güncel piyasa/KAP bildirimi çekildi.")
+    if items:
+        print("Örnek son haber başlığı:", items[0]["title"])
 
     return items
 
@@ -172,13 +182,12 @@ def run_kap_scanner():
         disc_id = str(item["id"])
         title = item["title"]
         link = item["link"]
-        item_stock = item["stock"]
         title_norm = normalize_tr(title)
 
-        # 1. Açık hisselerden biriyle eşleşme kontrolü
+        # Açık pozisyon hisselerinden biriyle eşleşme kontrolü
         eslesen_hisse = None
         for hisse in acik_hisseler:
-            if (item_stock and hisse == item_stock) or re.search(rf"\b{re.escape(hisse)}\b", title_norm):
+            if re.search(rf"\b{re.escape(hisse)}\b", title_norm):
                 eslesen_hisse = hisse
                 break
 
@@ -188,17 +197,14 @@ def run_kap_scanner():
         eslesen_sayisi += 1
         print(f"Açık hisseyle eşleşti: {eslesen_hisse} -> {title}")
 
-        # 2. Mükerrer kontrolü
         if disc_id in sent_ids:
             continue
 
-        # 3. Kritik filtre denetimi
         if not is_critical_disclosure(title):
             print(f"Elenen rutin bildirim: {eslesen_hisse} - {title}")
             new_sent_ids.append(disc_id)
             continue
 
-        # 4. Make.com Webhook iletimi
         payload = {
             "disclosure_id": disc_id,
             "sembol": eslesen_hisse,
@@ -213,12 +219,12 @@ def run_kap_scanner():
                 requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=15)
                 print(f"KRİTİK BİLDİRİM İLETİLDİ: {eslesen_hisse} - {title}")
             except Exception as ex:
-                print(f"Webhook gönderim hatası: {ex}")
+                print(f"Webhook hatası: {ex}")
 
         new_sent_ids.append(disc_id)
 
     if eslesen_sayisi == 0:
-        print(f"Canlı akıştaki bildirimlerde takip edilen {acik_hisseler} hisselerine ait haber bulunamadı.")
+        print(f"Piyasa akışındaki haberlerde takip edilen {acik_hisseler} koduna ait yeni haber bulunamadı.")
 
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(new_sent_ids[-300:], f, ensure_ascii=False, indent=2)
