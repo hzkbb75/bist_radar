@@ -5,7 +5,6 @@ import json
 import requests
 import pandas as pd
 from datetime import datetime
-from bs4 import BeautifulSoup
 
 # Ortam Değişkenleri
 ONEDRIVE_LINK = os.getenv("ONEDRIVE_SHARE_LINK")
@@ -88,67 +87,59 @@ def is_critical_disclosure(title):
     norm = normalize_tr(title)
     return any(kelime in norm for kelime in KRITIK_KATEGORILER)
 
-def fetch_live_kap_feed():
-    """Bigpara KAP akışını etiket bağımsız genel link ve tablo taramasıyla çeker."""
-    url = "https://bigpara.hurriyet.com.tr/kap-haberleri/"
+def fetch_live_kap_disclosures():
+    """Engelsiz Mynet Finans anlık KAP JSON API akışından bildirimleri çeker."""
+    url = "https://finans.mynet.com/borsa/haber/kap-haberleri/api/list"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://finans.mynet.com/borsa/haber/kap-haberleri/"
     }
     
     items = []
-    seen = set()
-
     try:
         r = requests.get(url, headers=headers, timeout=20)
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        # 1. Yöntem: Sayfadaki tüm KAP haber bağlantılarını tara
-        for a in soup.find_all("a", href=True):
-            href = a["href"].strip()
-            text = a.get_text(strip=True)
+        if r.status_code == 200:
+            data = r.json()
+            raw_items = data.get("data", []) if isinstance(data, dict) else data
             
-            # Sadece haber linklerini al, ana menü veya genel kategori linklerini geç
-            if "kap-haber" in href.lower() and len(text) > 10:
-                if href in seen or href.rstrip("/").endswith("/kap-haberleri"):
-                    continue
-                seen.add(href)
-
-                if not href.startswith("http"):
-                    href = f"https://bigpara.hurriyet.com.tr{href}"
-
-                disc_id = href.rstrip("/").split("-")[-1].replace("/", "")
-                items.append({
-                    "id": disc_id if disc_id else href,
-                    "title": text,
-                    "link": href
-                })
-
-        # 2. Yöntem: Tablo (tr/td) yapısı varsa satırları tara
-        if len(items) == 0:
-            for tr in soup.find_all("tr"):
-                cols = [td.get_text(strip=True) for td in tr.find_all("td") if td.get_text(strip=True)]
-                if len(cols) >= 2:
-                    row_text = " - ".join(cols)
-                    link_tag = tr.find("a")
-                    href = link_tag.get("href", "") if link_tag else ""
-                    if href and not href.startswith("http"):
-                        href = f"https://bigpara.hurriyet.com.tr{href}"
-                    
-                    disc_id = href if href else str(len(items))
-                    if disc_id not in seen:
-                        seen.add(disc_id)
-                        items.append({
-                            "id": disc_id,
-                            "title": row_text,
-                            "link": href or url
-                        })
-
-        print(f"Canlı akıştan {len(items)} adet KAP bildirimi başarıyla çekildi.")
-        if items:
-            print("Örnek son bildirim:", items[0]["title"])
+            for d in raw_items:
+                disc_id = str(d.get("id") or d.get("kapId") or d.get("disclosureId") or "")
+                title = d.get("title") or d.get("header") or d.get("subject") or ""
+                stock = d.get("stockCode") or d.get("code") or ""
+                link = d.get("url") or f"https://www.kap.org.tr/tr/Bildirim/{disc_id}"
+                
+                if title:
+                    items.append({
+                        "id": disc_id if disc_id else title,
+                        "title": title,
+                        "stock": normalize_tr(stock),
+                        "link": link
+                    })
+            print(f"Canlı API üzerinden {len(items)} adet KAP bildirimi başarıyla çekildi.")
+            if items:
+                print("Son bildirim örneği:", items[0]["title"])
+            return items
     except Exception as e:
-        print(f"Haber akışı alınırken hata: {e}")
+        print(f"Mynet API çağrısında hata: {e}")
+
+    # Alternatif Açık Uç Nokta (Yedek Besleme)
+    try:
+        alt_url = "https://bigpara.hurriyet.com.tr/api/v1/kap/news"
+        r = requests.get(alt_url, headers=headers, timeout=20)
+        if r.status_code == 200:
+            alt_data = r.json().get("data", [])
+            for d in alt_data:
+                items.append({
+                    "id": str(d.get("id", "")),
+                    "title": d.get("title", ""),
+                    "stock": normalize_tr(d.get("stockCode", "")),
+                    "link": d.get("url", "")
+                })
+            print(f"Yedek API üzerinden {len(items)} adet KAP bildirimi çekildi.")
+            return items
+    except Exception as ex:
+        print(f"Yedek API hatası: {ex}")
 
     return items
 
@@ -170,10 +161,10 @@ def run_kap_scanner():
                 sent_ids = []
 
     new_sent_ids = list(sent_ids)
-    disclosures = fetch_live_kap_feed()
+    disclosures = fetch_live_kap_disclosures()
 
     if not disclosures:
-        print("Haber akışından bildirim okunamadı.")
+        print("Haber akışından bildirim alınamadı.")
         return
 
     eslesen_sayisi = 0
@@ -181,12 +172,13 @@ def run_kap_scanner():
         disc_id = str(item["id"])
         title = item["title"]
         link = item["link"]
+        item_stock = item["stock"]
         title_norm = normalize_tr(title)
 
-        # 1. Açık pozisyon hisselerimizden biriyle eşleşiyor mu?
+        # 1. Açık hisselerden biriyle eşleşme kontrolü
         eslesen_hisse = None
         for hisse in acik_hisseler:
-            if re.search(rf"\b{re.escape(hisse)}\b", title_norm):
+            if (item_stock and hisse == item_stock) or re.search(rf"\b{re.escape(hisse)}\b", title_norm):
                 eslesen_hisse = hisse
                 break
 
@@ -196,11 +188,11 @@ def run_kap_scanner():
         eslesen_sayisi += 1
         print(f"Açık hisseyle eşleşti: {eslesen_hisse} -> {title}")
 
-        # 2. Daha önce gönderildi mi?
+        # 2. Mükerrer kontrolü
         if disc_id in sent_ids:
             continue
 
-        # 3. Kritik filtreye giriyor mu?
+        # 3. Kritik filtre denetimi
         if not is_critical_disclosure(title):
             print(f"Elenen rutin bildirim: {eslesen_hisse} - {title}")
             new_sent_ids.append(disc_id)
@@ -226,7 +218,7 @@ def run_kap_scanner():
         new_sent_ids.append(disc_id)
 
     if eslesen_sayisi == 0:
-        print(f"Canlı akıştaki bildirimlerde takip edilen {acik_hisseler} koduna ait yeni haber bulunamadı.")
+        print(f"Canlı akıştaki bildirimlerde takip edilen {acik_hisseler} hisselerine ait haber bulunamadı.")
 
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(new_sent_ids[-300:], f, ensure_ascii=False, indent=2)
