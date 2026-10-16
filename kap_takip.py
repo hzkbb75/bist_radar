@@ -9,45 +9,53 @@ from datetime import datetime
 # AYARLAR VE ÇEVRE DEĞİŞKENLERİ
 # ==========================================
 MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
-# Embed kodunuzdan türetilen doğrudan indirme linki:
-ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQT2WvVMDCAOSJKa6ur72EdJAQ03z7ZNT3chf5Ss6mXGUgw?download=1"
+ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
 STATE_FILE = "son_bildirimler.json"
 
 # KAP API Endpoint'i (Son bildirimler)
 KAP_API_URL = "https://www.kap.org.tr/tr/api/disclosures"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.kap.org.tr/",
     "Accept": "application/json, text/plain, */*"
 }
 
-def get_open_positions():
-    """OneDrive üzerinden Excel'i doğrudan indirip hisse sembollerini çeker."""
-    if not ONEDRIVE_EXCEL_URL:
-        print("UYARI: ONEDRIVE_EXCEL_URL tanımlı değil!")
-        return set()
+def download_excel_file(url):
+    """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir."""
+    session = requests.Session()
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    }
+    # 1. Yöntem: Doğrudan indirme parametresiyle dene
+    target_url = url if "download=1" in url else f"{url}&download=1"
+    res = session.get(target_url, allow_redirects=True, timeout=25)
     
-    try:
-        res = requests.get(ONEDRIVE_EXCEL_URL, headers=headers, allow_redirects=True, timeout=30)
+    # Eğer tarayıcı görüntüleyicisine (view.aspx) yönlendirdiyse indirme linkine çevir
+    if "view.aspx" in res.url:
+        direct_url = res.url.replace("view.aspx", "download.aspx")
+        res = session.get(direct_url, timeout=25)
         
-        # Dosyanın gerçek Excel (ZIP / PK başlığı) olup olmadığını kontrol et
-        if not res.content.startswith(b'PK'):
-            # Alternatif indirme uç noktasını dene
-            alt_url = "https://onedrive.live.com/download?resid=cb9e9d1c772ef382!IQT2WvVMDCAOSJKa6ur72EdJAQ03z7ZNT3chf5Ss6mXGUgw"
-            res = requests.get(alt_url, headers=headers, allow_redirects=True, timeout=30)
+    if res.content.startswith(b'PK'):
+        return res.content
 
-        if not res.content.startswith(b'PK'):
-            print(f"HATA: İndirilen veri Excel formatında değil (HTTP {res.status_code}).")
-            print(f"Gelen sayfa içeriği (ilk 200 karakter): {res.text[:200]}")
+    # 2. Yöntem: OneDrive Live doğrudan dosya indirme köprüsü
+    live_download_url = "https://onedrive.live.com/download?cid=CB9E9D1C772EF382&resid=CB9E9D1C772EF382!s4cf55af6200c480e929aeaeafbd84749"
+    res_live = session.get(live_download_url, allow_redirects=True, timeout=25)
+    if res_live.content.startswith(b'PK'):
+        return res_live.content
+
+    return None
+
+def get_open_positions():
+    """OneDrive üzerindeki Excel'i indirip açık pozisyondaki hisse sembollerini çeker."""
+    try:
+        content = download_excel_file(ONEDRIVE_EXCEL_URL)
+        if not content:
+            print("HATA: Excel dosyası indirilemedi (Sunucu HTML sayfası döndürdü).")
             return set()
 
-        df = pd.read_excel(io.BytesIO(res.content), engine="openpyxl")
+        df = pd.read_excel(io.BytesIO(content), engine="openpyxl")
         
+        # 'Hisse' veya 'Sembol' kolonunu tespit et
         col_name = None
         for col in df.columns:
             if str(col).strip().upper() in ["HISSE", "SEMBOL", "HİSSE", "TICKER", "KOD"]:
@@ -60,7 +68,6 @@ def get_open_positions():
         semboller = set(df[col_name].dropna().astype(str).str.strip().str.upper())
         print(f"Takip edilecek portföy hisseleri ({len(semboller)} adet): {', '.join(semboller)}")
         return semboller
-
     except Exception as e:
         print(f"OneDrive Excel okuma hatası: {e}")
         return set()
@@ -148,7 +155,7 @@ def main():
             seen_ids.add(bildirim_id)
 
     save_seen_ids(seen_ids)
-    print(f"Tarama tamamlandı. {yeni_sayac} adet yeni bildirim iletildi.")
+    print(f"Tarama tamamlandı. {yeni_sayac} adet yeni bildirim Telegram'a aktarıldı.")
 
 if __name__ == "__main__":
     main()
