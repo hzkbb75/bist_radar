@@ -1,6 +1,7 @@
 import os
 import json
 import io
+import base64
 import requests
 import pandas as pd
 from datetime import datetime
@@ -9,7 +10,7 @@ from datetime import datetime
 # AYARLAR VE ÇEVRE DEĞİŞKENLERİ
 # ==========================================
 MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
-ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJ02pbY0w?e=VA4N5A&download=1"
+ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJ02pbY0w?e=VA4N5A"
 STATE_FILE = "son_bildirimler.json"
 
 # KAP API Endpoint'i (Son bildirimler)
@@ -21,6 +22,13 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*"
 }
 
+def get_onedrive_direct_url(url):
+    """OneDrive linkini doğrudan dosya indiren Microsoft API adresine dönüştürür."""
+    clean_url = url.split('&download=')[0].split('?download=')[0]
+    encoded = base64.b64encode(clean_url.encode('utf-8')).decode('utf-8')
+    encoded_url = encoded.replace('/', '_').replace('+', '-').rstrip('=')
+    return f"https://api.onedrive.com/v1.0/shares/u!{encoded_url}/root/content"
+
 def get_open_positions():
     """OneDrive üzerindeki Excel'i indirip açık pozisyondaki hisse sembollerini çeker."""
     if not ONEDRIVE_EXCEL_URL:
@@ -28,16 +36,21 @@ def get_open_positions():
         return set()
     
     try:
-        # OneDrive yönlendirmelerini takip ederek dosyayı indir
-        res = requests.get(ONEDRIVE_EXCEL_URL, allow_redirects=True, timeout=25)
-        if res.status_code != 200:
-            print(f"OneDrive indirme hatası: HTTP {res.status_code}")
+        direct_url = get_onedrive_direct_url(ONEDRIVE_EXCEL_URL)
+        res = requests.get(direct_url, headers={"User-Agent": HEADERS["User-Agent"]}, allow_redirects=True, timeout=25)
+        
+        # Eğer API yönlendirmesi başarılı olmadıysa klasik linki dene
+        if res.status_code != 200 or not res.content.startswith(b'PK'):
+            fallback_url = ONEDRIVE_EXCEL_URL if "download=1" in ONEDRIVE_EXCEL_URL else f"{ONEDRIVE_EXCEL_URL}&download=1"
+            res = requests.get(fallback_url, headers={"User-Agent": HEADERS["User-Agent"]}, allow_redirects=True, timeout=25)
+
+        # Gelen dosyanın gerçek zip/xlsx olup olmadığını doğrula
+        if not res.content.startswith(b'PK'):
+            print(f"HATA: İndirilen dosya Excel değil. İlk 100 karakter: {res.text[:100]}")
             return set()
-            
-        # openpyxl motoruyla doğrudan bellekten oku
+
         df = pd.read_excel(io.BytesIO(res.content), engine="openpyxl")
         
-        # 'Hisse' veya 'Sembol' kolonunu tespit et
         col_name = None
         for col in df.columns:
             if str(col).strip().upper() in ["HISSE", "SEMBOL", "HİSSE", "TICKER", "KOD"]:
@@ -55,7 +68,7 @@ def get_open_positions():
         return set()
 
 def load_seen_ids():
-    """Daha önce Telegram'a gönderilmiş bildirim ID'lerini yükler."""
+    """Daha önce gönderilmiş bildirim ID'lerini yükler."""
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -65,7 +78,7 @@ def load_seen_ids():
     return set()
 
 def save_seen_ids(seen_ids):
-    """İşlenen bildirim ID'lerini kaydeder (Maksimum son 500 ID saklanır)."""
+    """İşlenen bildirim ID'lerini kaydeder."""
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen_ids)[-500:], f, ensure_ascii=False, indent=2)
 
@@ -106,7 +119,6 @@ def main():
     
     yeni_sayac = 0
     for item in bildirimler:
-        # KAP JSON yapısından verileri ayıkla
         disclosure = item.get("basic", {}) if "basic" in item else item
         
         bildirim_id = str(disclosure.get("disclosureIndex") or disclosure.get("id") or "")
@@ -114,19 +126,14 @@ def main():
         baslik = disclosure.get("title") or disclosure.get("disclosureType") or "KAP Bildirimi"
         zaman = disclosure.get("publishDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
         
-        # ID yoksa veya daha önce gönderildiyse atla
         if not bildirim_id or bildirim_id in seen_ids:
             continue
             
-        # Birden fazla hisse kodu virgülle gelebilir (örn: THYAO, PGSUS)
         ilgili_hisseler = [s.strip() for s in sembol.replace(";", ",").split(",") if s.strip()]
-        
-        # Portföyümüzdeki hisselerle eşleşme kontrolü
         eslesen = any(h in portfoy_sembolleri for h in ilgili_hisseler)
         
         if eslesen:
             kap_link = f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
-            
             payload = {
                 "sembol": sembol,
                 "baslik": baslik,
@@ -134,14 +141,12 @@ def main():
                 "kap_link": kap_link,
                 "ozet": disclosure.get("summary") or baslik
             }
-            
             print(f"Eşleşme bulundu: {sembol} - {baslik}")
             basarili = send_to_make(payload)
             if basarili:
                 seen_ids.add(bildirim_id)
                 yeni_sayac += 1
         else:
-            # Portföy dışı bildirimleri de tekrar kontrol etmemek için hafızaya al
             seen_ids.add(bildirim_id)
 
     save_seen_ids(seen_ids)
