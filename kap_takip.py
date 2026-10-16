@@ -7,8 +7,8 @@ from datetime import datetime
 # ==========================================
 # AYARLAR VE ÇEVRE DEĞİŞKENLERİ
 # ==========================================
-MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
-ONEDRIVE_EXCEL_URL = os.getenv("ONEDRIVE_EXCEL_URL")  # OneDrive doğrudan indirme linki (download=1 parametreli)
+MAKE_WEBHOOK_URL = os.getenv("https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j")
+ONEDRIVE_EXCEL_URL = os.getenv("https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=VA4N5A")  # OneDrive doğrudan indirme linki (download=1 parametreli)
 STATE_FILE = "son_bildirimler.json"
 
 # KAP API Endpoint'i (Son bildirimler)
