@@ -1,5 +1,6 @@
 import os
 import json
+import io
 import requests
 import pandas as pd
 from datetime import datetime
@@ -21,14 +22,20 @@ HEADERS = {
 }
 
 def get_open_positions():
-    """OneDrive üzerindeki Excel'den açık pozisyondaki hisse sembollerini çeker."""
+    """OneDrive üzerindeki Excel'i indirip açık pozisyondaki hisse sembollerini çeker."""
     if not ONEDRIVE_EXCEL_URL:
         print("UYARI: ONEDRIVE_EXCEL_URL tanımlı değil!")
         return set()
     
     try:
-        # Excel dosyasını doğrudan indirip oku
-        df = pd.read_excel(ONEDRIVE_EXCEL_URL)
+        # OneDrive yönlendirmelerini takip ederek dosyayı indir
+        res = requests.get(ONEDRIVE_EXCEL_URL, allow_redirects=True, timeout=25)
+        if res.status_code != 200:
+            print(f"OneDrive indirme hatası: HTTP {res.status_code}")
+            return set()
+            
+        # openpyxl motoruyla doğrudan bellekten oku
+        df = pd.read_excel(io.BytesIO(res.content), engine="openpyxl")
         
         # 'Hisse' veya 'Sembol' kolonunu tespit et
         col_name = None
@@ -38,7 +45,7 @@ def get_open_positions():
                 break
         
         if not col_name:
-            col_name = df.columns[0]  # Bulamazsa ilk sütunu baz alır
+            col_name = df.columns[0]
             
         semboller = set(df[col_name].dropna().astype(str).str.strip().str.upper())
         print(f"Takip edilecek portföy hisseleri ({len(semboller)} adet): {', '.join(semboller)}")
