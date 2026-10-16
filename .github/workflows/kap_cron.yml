@@ -1,0 +1,39 @@
+name: KAP Acik Pozisyon Takipcisi
+
+on:
+  schedule:
+    # Hafta içi (Pazartesi-Cuma) Türkiye saatiyle 10:00 - 18:30 arası her 30 dakikada bir (UTC 07:00 - 15:30)
+    - cron: '*/30 7-15 * * 1-5'
+  workflow_dispatch: # Manuel test için buton
+
+jobs:
+  tara_ve_gonder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: KAP Bildirimlerini Tara
+        env:
+          ONEDRIVE_SHARE_LINK: ${{ secrets.ONEDRIVE_SHARE_LINK }}
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+        run: |
+          python kap_takip.py
+
+      - name: Mükerrer Kayıtları Kaydet (Git Commit & Push)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add son_bildirimler.json || true
+          git commit -m "Bildirim gecmisi guncellendi" || true
+          git push || true
