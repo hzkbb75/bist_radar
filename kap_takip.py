@@ -1,7 +1,6 @@
 import os
 import json
 import io
-import base64
 import requests
 import pandas as pd
 from datetime import datetime
@@ -10,43 +9,41 @@ from datetime import datetime
 # AYARLAR VE ÇEVRE DEĞİŞKENLERİ
 # ==========================================
 MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
-ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJ02pbY0w?e=VA4N5A"
+# Embed kodunuzdan türetilen doğrudan indirme linki:
+ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQT2WvVMDCAOSJKa6ur72EdJAQ03z7ZNT3chf5Ss6mXGUgw?download=1"
 STATE_FILE = "son_bildirimler.json"
 
 # KAP API Endpoint'i (Son bildirimler)
 KAP_API_URL = "https://www.kap.org.tr/tr/api/disclosures"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Referer": "https://www.kap.org.tr/",
     "Accept": "application/json, text/plain, */*"
 }
 
-def get_onedrive_direct_url(url):
-    """OneDrive linkini doğrudan dosya indiren Microsoft API adresine dönüştürür."""
-    clean_url = url.split('&download=')[0].split('?download=')[0]
-    encoded = base64.b64encode(clean_url.encode('utf-8')).decode('utf-8')
-    encoded_url = encoded.replace('/', '_').replace('+', '-').rstrip('=')
-    return f"https://api.onedrive.com/v1.0/shares/u!{encoded_url}/root/content"
-
 def get_open_positions():
-    """OneDrive üzerindeki Excel'i indirip açık pozisyondaki hisse sembollerini çeker."""
+    """OneDrive üzerinden Excel'i doğrudan indirip hisse sembollerini çeker."""
     if not ONEDRIVE_EXCEL_URL:
         print("UYARI: ONEDRIVE_EXCEL_URL tanımlı değil!")
         return set()
     
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    
     try:
-        direct_url = get_onedrive_direct_url(ONEDRIVE_EXCEL_URL)
-        res = requests.get(direct_url, headers={"User-Agent": HEADERS["User-Agent"]}, allow_redirects=True, timeout=25)
+        res = requests.get(ONEDRIVE_EXCEL_URL, headers=headers, allow_redirects=True, timeout=30)
         
-        # Eğer API yönlendirmesi başarılı olmadıysa klasik linki dene
-        if res.status_code != 200 or not res.content.startswith(b'PK'):
-            fallback_url = ONEDRIVE_EXCEL_URL if "download=1" in ONEDRIVE_EXCEL_URL else f"{ONEDRIVE_EXCEL_URL}&download=1"
-            res = requests.get(fallback_url, headers={"User-Agent": HEADERS["User-Agent"]}, allow_redirects=True, timeout=25)
-
-        # Gelen dosyanın gerçek zip/xlsx olup olmadığını doğrula
+        # Dosyanın gerçek Excel (ZIP / PK başlığı) olup olmadığını kontrol et
         if not res.content.startswith(b'PK'):
-            print(f"HATA: İndirilen dosya Excel değil. İlk 100 karakter: {res.text[:100]}")
+            # Alternatif indirme uç noktasını dene
+            alt_url = "https://onedrive.live.com/download?resid=cb9e9d1c772ef382!IQT2WvVMDCAOSJKa6ur72EdJAQ03z7ZNT3chf5Ss6mXGUgw"
+            res = requests.get(alt_url, headers=headers, allow_redirects=True, timeout=30)
+
+        if not res.content.startswith(b'PK'):
+            print(f"HATA: İndirilen veri Excel formatında değil (HTTP {res.status_code}).")
+            print(f"Gelen sayfa içeriği (ilk 200 karakter): {res.text[:200]}")
             return set()
 
         df = pd.read_excel(io.BytesIO(res.content), engine="openpyxl")
@@ -63,6 +60,7 @@ def get_open_positions():
         semboller = set(df[col_name].dropna().astype(str).str.strip().str.upper())
         print(f"Takip edilecek portföy hisseleri ({len(semboller)} adet): {', '.join(semboller)}")
         return semboller
+
     except Exception as e:
         print(f"OneDrive Excel okuma hatası: {e}")
         return set()
@@ -150,7 +148,7 @@ def main():
             seen_ids.add(bildirim_id)
 
     save_seen_ids(seen_ids)
-    print(f"Tarama tamamlandı. {yeni_sayac} adet yeni bildirim Telegram'a aktarıldı.")
+    print(f"Tarama tamamlandı. {yeni_sayac} adet yeni bildirim iletildi.")
 
 if __name__ == "__main__":
     main()
