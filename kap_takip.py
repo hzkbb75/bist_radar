@@ -1,6 +1,7 @@
 import os
 import json
 import io
+import time
 import requests
 import pandas as pd
 from datetime import datetime
@@ -12,33 +13,42 @@ MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
 ONEDRIVE_EXCEL_URL = "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
 STATE_FILE = "son_bildirimler.json"
 
-# KAP API Endpoint'i (Son bildirimler)
+# KAP API Endpoint'i
 KAP_API_URL = "https://www.kap.org.tr/tr/api/disclosures"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Referer": "https://www.kap.org.tr/",
-    "Accept": "application/json, text/plain, */*"
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
 }
+
+# İsteğe bağlı: Sadece belirli başlıkları almak isterseniz kelimeleri ekleyebilirsiniz.
+# Boş liste [] bırakırsanız açık pozisyondaki hissenin TÜM haberleri Telegram'a iletilir.
+FILTRE_BASLIKLAR = []  # Örn: ["Özel Durum Açıklaması", "Finansal Rapor", "Sözleşme"]
 
 def download_excel_file(url):
     """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir."""
     session = requests.Session()
     target_url = url if "download=1" in url else f"{url}&download=1"
-    res = session.get(target_url, allow_redirects=True, timeout=25)
     
-    if "view.aspx" in res.url:
-        direct_url = res.url.replace("view.aspx", "download.aspx")
-        res = session.get(direct_url, timeout=25)
-        
-    if res.content.startswith(b'PK'):
-        return res.content
+    for attempt in range(3):
+        try:
+            res = session.get(target_url, allow_redirects=True, timeout=30)
+            if "view.aspx" in res.url:
+                direct_url = res.url.replace("view.aspx", "download.aspx")
+                res = session.get(direct_url, timeout=30)
+                
+            if res.content.startswith(b'PK'):
+                return res.content
 
-    live_download_url = "https://onedrive.live.com/download?cid=CB9E9D1C772EF382&resid=CB9E9D1C772EF382!s4cf55af6200c480e929aeaeafbd84749"
-    res_live = session.get(live_download_url, allow_redirects=True, timeout=25)
-    if res_live.content.startswith(b'PK'):
-        return res_live.content
-
+            live_download_url = "https://onedrive.live.com/download?cid=CB9E9D1C772EF382&resid=CB9E9D1C772EF382!s4cf55af6200c480e929aeaeafbd84749"
+            res_live = session.get(live_download_url, allow_redirects=True, timeout=30)
+            if res_live.content.startswith(b'PK'):
+                return res_live.content
+        except requests.exceptions.RequestException:
+            if attempt < 2:
+                time.sleep(2)
     return None
 
 def get_open_positions():
@@ -51,7 +61,6 @@ def get_open_positions():
 
         excel_file = pd.ExcelFile(io.BytesIO(content), engine="openpyxl")
         
-        # 'İşlem_Günlüğü' sayfasını dinamik olarak yakala
         target_sheet = None
         for name in excel_file.sheet_names:
             if "İŞLEM" in name.upper() or "ISLEM" in name.upper():
@@ -78,7 +87,6 @@ def get_open_positions():
             print(f"HATA: '{target_sheet}' sayfasında 'Hisse' kolonu bulunamadı.")
             return set()
 
-        # Pozisyon durumu filtresi: Sadece 'AÇIK' olan pozisyonları çek
         if durum_col:
             df_acik = df[df[durum_col].astype(str).str.strip().str.upper().isin(["AÇIK", "ACIK"])]
             semboller = set(df_acik[hisse_col].dropna().astype(str).str.strip().str.upper())
@@ -103,21 +111,28 @@ def load_seen_ids():
     return set()
 
 def save_seen_ids(seen_ids):
-    """İşlenen bildirim ID'lerini kaydeder."""
+    """İşlenen bildirim ID'lerini kaydeder (Son 1000 ID saklanır)."""
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(seen_ids)[-500:], f, ensure_ascii=False, indent=2)
+        json.dump(list(seen_ids)[-1000:], f, ensure_ascii=False, indent=2)
 
 def fetch_kap_disclosures():
-    """KAP üzerinden son bildirimleri çeker."""
-    try:
-        response = requests.get(KAP_API_URL, headers=HEADERS, timeout=20)
-        if response.status_code == 200:
-            return response.json()
-        print(f"KAP API hatası: HTTP {response.status_code}")
-        return []
-    except Exception as e:
-        print(f"KAP bağlantı hatası: {e}")
-        return []
+    """KAP üzerinden son bildirimleri 3 deneme ve 45sn timeout korumasıyla çeker."""
+    for attempt in range(1, 4):
+        try:
+            response = requests.get(KAP_API_URL, headers=HEADERS, timeout=45)
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Canlı akıştan {len(data)} adet KAP bildirimi başarıyla çekildi.")
+                return data
+            print(f"[{attempt}/3] KAP API uyarısı: HTTP {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"[{attempt}/3] KAP bağlantı hatası (Tekrar deneniyor): {e}")
+        
+        if attempt < 3:
+            time.sleep(3)
+            
+    print("KAP verisi 3 deneme sonucunda alınamadı.")
+    return []
 
 def send_to_make(payload):
     """Eşleşen bildirimi Make.com Webhook'una iletir."""
@@ -125,11 +140,17 @@ def send_to_make(payload):
         print("HATA: MAKE_WEBHOOK_URL tanımlı değil!")
         return False
     try:
-        res = requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=15)
+        res = requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=20)
         return res.status_code == 200
     except Exception as e:
         print(f"Make.com Webhook gönderim hatası: {e}")
         return False
+
+def baslik_uygun_mu(baslik):
+    """Konu/başlık filtresi tanımlıysa kontrol eder, boşsa tümünü onaylar."""
+    if not FILTRE_BASLIKLAR:
+        return True
+    return any(f.lower() in baslik.lower() for f in FILTRE_BASLIKLAR)
 
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Canlı KAP taraması başlatıldı.")
@@ -150,6 +171,7 @@ def main():
         sembol = str(disclosure.get("stockCodes") or disclosure.get("companyOid") or "").strip().upper()
         baslik = disclosure.get("title") or disclosure.get("disclosureType") or "KAP Bildirimi"
         zaman = disclosure.get("publishDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
+        ozet = disclosure.get("summary") or baslik
         
         if not bildirim_id or bildirim_id in seen_ids:
             continue
@@ -158,19 +180,23 @@ def main():
         eslesen = any(h in portfoy_sembolleri for h in ilgili_hisseler)
         
         if eslesen:
-            kap_link = f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
-            payload = {
-                "sembol": sembol,
-                "baslik": baslik,
-                "zaman": zaman,
-                "kap_link": kap_link,
-                "ozet": disclosure.get("summary") or baslik
-            }
-            print(f"Eşleşme bulundu: {sembol} - {baslik}")
-            basarili = send_to_make(payload)
-            if basarili:
+            if baslik_uygun_mu(baslik):
+                kap_link = f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
+                payload = {
+                    "sembol": sembol,
+                    "baslik": baslik,
+                    "zaman": zaman,
+                    "kap_link": kap_link,
+                    "ozet": ozet
+                }
+                print(f"Eşleşme bulundu: {sembol} - {baslik}")
+                basarili = send_to_make(payload)
+                if basarili:
+                    seen_ids.add(bildirim_id)
+                    yeni_sayac += 1
+            else:
+                # İlgili hisse ama filtrenin dışındaki bir haber türü olduğu için işaretlenip geçilir
                 seen_ids.add(bildirim_id)
-                yeni_sayac += 1
         else:
             seen_ids.add(bildirim_id)
 
