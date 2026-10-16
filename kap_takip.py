@@ -24,12 +24,9 @@ HEADERS = {
 def download_excel_file(url):
     """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir."""
     session = requests.Session()
-    
-    # 1. Yöntem: Doğrudan indirme parametresiyle dene
     target_url = url if "download=1" in url else f"{url}&download=1"
     res = session.get(target_url, allow_redirects=True, timeout=25)
     
-    # Eğer tarayıcı görüntüleyicisine (view.aspx) yönlendirdiyse indirme linkine çevir
     if "view.aspx" in res.url:
         direct_url = res.url.replace("view.aspx", "download.aspx")
         res = session.get(direct_url, timeout=25)
@@ -37,7 +34,6 @@ def download_excel_file(url):
     if res.content.startswith(b'PK'):
         return res.content
 
-    # 2. Yöntem: OneDrive Live doğrudan dosya indirme köprüsü
     live_download_url = "https://onedrive.live.com/download?cid=CB9E9D1C772EF382&resid=CB9E9D1C772EF382!s4cf55af6200c480e929aeaeafbd84749"
     res_live = session.get(live_download_url, allow_redirects=True, timeout=25)
     if res_live.content.startswith(b'PK'):
@@ -46,26 +42,50 @@ def download_excel_file(url):
     return None
 
 def get_open_positions():
-    """OneDrive üzerindeki Excel'i indirip açık pozisyondaki hisse sembollerini çeker."""
+    """OneDrive Excel'in 'İşlem_Günlüğü' sayfasından Pozisyon Durumu 'AÇIK' olan hisseleri çeker."""
     try:
         content = download_excel_file(ONEDRIVE_EXCEL_URL)
         if not content:
-            print("HATA: Excel dosyası indirilemedi (Sunucu HTML sayfası döndürdü).")
+            print("HATA: Excel dosyası indirilemedi.")
             return set()
 
-        df = pd.read_excel(io.BytesIO(content), engine="openpyxl")
+        excel_file = pd.ExcelFile(io.BytesIO(content), engine="openpyxl")
         
-        # 'Hisse' veya 'Sembol' kolonunu tespit et
-        col_name = None
-        for col in df.columns:
-            if str(col).strip().upper() in ["HISSE", "SEMBOL", "HİSSE", "TICKER", "KOD"]:
-                col_name = col
+        # 'İşlem_Günlüğü' sayfasını dinamik olarak yakala
+        target_sheet = None
+        for name in excel_file.sheet_names:
+            if "İŞLEM" in name.upper() or "ISLEM" in name.upper():
+                target_sheet = name
                 break
         
-        if not col_name:
-            col_name = df.columns[0]
-            
-        semboller = set(df[col_name].dropna().astype(str).str.strip().str.upper())
+        if not target_sheet:
+            target_sheet = excel_file.sheet_names[0]
+
+        df = pd.read_excel(excel_file, sheet_name=target_sheet)
+        df.columns = [str(c).strip() for c in df.columns]
+
+        hisse_col = None
+        durum_col = None
+
+        for col in df.columns:
+            c_upper = col.upper()
+            if c_upper in ["HİSSE", "HISSE", "SEMBOL", "KOD"]:
+                hisse_col = col
+            if "DURUM" in c_upper:
+                durum_col = col
+
+        if not hisse_col:
+            print(f"HATA: '{target_sheet}' sayfasında 'Hisse' kolonu bulunamadı.")
+            return set()
+
+        # Pozisyon durumu filtresi: Sadece 'AÇIK' olan pozisyonları çek
+        if durum_col:
+            df_acik = df[df[durum_col].astype(str).str.strip().str.upper().isin(["AÇIK", "ACIK"])]
+            semboller = set(df_acik[hisse_col].dropna().astype(str).str.strip().str.upper())
+        else:
+            semboller = set(df[hisse_col].dropna().astype(str).str.strip().str.upper())
+
+        semboller = {s for s in semboller if s and s != "NAN"}
         print(f"Takip edilecek portföy hisseleri ({len(semboller)} adet): {', '.join(semboller)}")
         return semboller
     except Exception as e:
