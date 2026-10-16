@@ -1,7 +1,6 @@
 import os
 import io
 import json
-import base64
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
@@ -24,10 +23,27 @@ KRITIK_KATEGORILER = [
     "KAPASİTE ARTIŞI"
 ]
 
-def get_onedrive_direct_url(sharing_url):
-    """OneDrive linkini doğrudan raw indirme bağlantısına çevirir."""
-    data_bytes64 = base64.urlsafe_b64encode(sharing_url.encode()).decode().rstrip("=")
-    return f"https://api.onedrive.com/v1.0/shares/u!{data_bytes64}/root/content"
+def download_excel_file(sharing_url):
+    """OneDrive linkini doğrudan indirilebilir dosya akışına çevirir."""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    })
+
+    # Doğrudan indirme parametresi ekleme
+    separator = "&" if "?" in sharing_url else "?"
+    download_url = f"{sharing_url}{separator}download=1" if "download=1" not in sharing_url else sharing_url
+
+    resp = session.get(download_url, allow_redirects=True, timeout=30)
+    resp.raise_for_status()
+
+    # Eğer önizleme web sayfasına yönlendirildiyse download.aspx'e çevir
+    if "html" in resp.headers.get("Content-Type", "").lower() and "view.aspx" in resp.url:
+        direct_url = resp.url.replace("view.aspx", "download.aspx")
+        resp = session.get(direct_url, allow_redirects=True, timeout=30)
+        resp.raise_for_status()
+
+    return resp.content
 
 def get_open_positions():
     """Excel İşlem_Günlüğü sayfasından AÇIK hisseleri çeker."""
@@ -35,13 +51,10 @@ def get_open_positions():
         print("HATA: ONEDRIVE_SHARE_LINK tanımlanmamış.")
         return []
 
-    direct_url = get_onedrive_direct_url(ONEDRIVE_LINK)
-    resp = requests.get(direct_url, timeout=30)
-    resp.raise_for_status()
-
-    excel_file = io.BytesIO(resp.content)
-    df = pd.read_excel(excel_file, sheet_name="İşlem_Günlüğü")
-    df.columns = [c.strip() for c in df.columns]
+    content = download_excel_file(ONEDRIVE_LINK)
+    excel_file = io.BytesIO(content)
+    df = pd.read_excel(excel_file, sheet_name="İşlem_Günlüğü", engine="openpyxl")
+    df.columns = [str(c).strip() for c in df.columns]
 
     acik_mask = df["Pozisyon Durumu"].astype(str).str.strip().str.upper() == "AÇIK"
     acik_hisseler = df.loc[acik_mask, "Hisse"].dropna().unique().tolist()
@@ -57,7 +70,7 @@ def run_kap_scanner():
     print(f"Takip Edilen Açık Pozisyonlar: {acik_hisseler}")
 
     if not acik_hisseler:
-        print("Portföyde açık hisse bulunamadı. Tarama tamamlandı.")
+        print("Portföyde açık hisse bulunamadı veya liste boş. Tarama tamamlandı.")
         return
 
     # Gönderilmiş bildirimlerin hafızası (Mükerrer önleme)
@@ -71,9 +84,9 @@ def run_kap_scanner():
                 sent_ids = []
 
     new_sent_ids = list(sent_ids)
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     
-    # Son 3 günün aralığı (Geriye dönük güvenlik penceresi)
+    # Son 3 günün aralığı
     from_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
     to_date = datetime.now().strftime("%Y-%m-%d")
 
