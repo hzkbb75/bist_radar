@@ -2,9 +2,9 @@ name: Canlı KAP Bildirim Takibi
 
 on:
   schedule:
-    # Hafta içi TSİ 09:00 - 21:40 arası her 20 dakikada bir (UTC 06:00 - 18:40)
-    - cron: '*/20 6-18 * * 1-5'
-  workflow_dispatch:
+    # Hafta içi TSİ 09:15 ve TSİ 20:45 (UTC 06:15 ve 17:45)
+    - cron: '15 6,17 * * 1-5'
+  workflow_dispatch: # GitHub panelinden manuel 'Run workflow' yapabilmek için
 
 permissions:
   contents: write
@@ -46,7 +46,7 @@ jobs:
               echo "Değişiklik yok, kayıt atlandı."
             else
               git commit -m "chore: son bildirimler hafızası güncellendi [skip ci]"
-              git pull --rebase origin main || git pull --rebase
+              git pull --rebase origin main || git pull --rebase || true
               git push
             fi
           else
