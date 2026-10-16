@@ -5,13 +5,13 @@ import json
 import requests
 import pandas as pd
 from datetime import datetime
-import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
 
 # Ortam Değişkenleri
 ONEDRIVE_LINK = os.getenv("ONEDRIVE_SHARE_LINK")
 MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL")
 
-# Kritik Bildirim Filtresi
+# Kritik Bildirim Filtresi (Fiyata etki edebilecek gelişmeler)
 KRITIK_KATEGORILER = [
     "YENİ İŞ İLİŞKİSİ",
     "FİNANSAL DURAN VARLIK",
@@ -71,63 +71,59 @@ def is_critical_disclosure(title, summary):
     metin = f"{title} {summary}".upper()
     return any(kelime in metin for kelime in KRITIK_KATEGORILER)
 
-def get_recent_kap_disclosures():
-    """KAP bildirimlerini RSS akışı üzerinden zaman aşımına takılmadan çeker."""
-    session = requests.Session()
-    session.headers.update({
+def fetch_live_kap_feed():
+    """Engelsiz ve hızlı Bigpara KAP akışını tarar."""
+    url = "https://bigpara.hurriyet.com.tr/kap-haberleri/"
+    headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/rss+xml, application/xml, text/xml, */*"
-    })
-
-    # 1. Öncelik: KAP Resmi RSS Beslemesi
-    rss_url = "https://www.kap.org.tr/tr/rss/bildirimler"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+    
+    items = []
     try:
-        resp = session.get(rss_url, timeout=20)
-        if resp.status_code == 200:
-            root = ET.fromstring(resp.content)
-            items = []
-            for item in root.findall(".//item"):
-                title = item.findtext("title", "")
-                link = item.findtext("link", "")
-                desc = item.findtext("description", "")
-                
-                # Linkten bildirim ID'sini al (örn: /tr/Bildirim/123456 -> 123456)
-                disc_id = link.rstrip("/").split("/")[-1] if "/" in link else title
-                items.append({
-                    "disclosureId": disc_id,
-                    "title": title,
-                    "summary": desc,
-                    "link": link
-                })
-            print(f"KAP RSS üzerinden {len(items)} adet güncel bildirim çekildi.")
+        r = requests.get(url, headers=headers, timeout=20)
+        if r.status_code != 200:
+            print(f"Besleme yanıt kodu: {r.status_code}")
             return items
-    except Exception as e:
-        print(f"RSS akışı alınamadı ({e}), genel akış deneniyor...")
 
-    # 2. Yedek Öncelik: Genel Bildirimler JSON akışı (parametresiz)
-    try:
-        json_url = "https://www.kap.org.tr/tr/api/disclosures"
-        resp = session.get(json_url, timeout=20)
-        if resp.status_code == 200:
-            data = resp.json()
-            print(f"KAP API üzerinden {len(data)} adet bildirim çekildi.")
-            return [{
-                "disclosureId": str(d.get("disclosureId")),
-                "title": d.get("title", ""),
-                "summary": d.get("summary", ""),
-                "link": f"https://www.kap.org.tr/tr/Bildirim/{d.get('disclosureId')}"
-            } for d in data]
-    except Exception as e:
-        print(f"Genel bildirim akışı da alınamadı: {e}")
+        soup = BeautifulSoup(r.text, "html.parser")
+        
+        # KAP haber bloklarını topla
+        rows = soup.find_all("li", class_="cell01")
+        if not rows:
+            rows = soup.select(".kapNewsList li, .newsList li")
 
-    return []
+        for row in rows:
+            link_tag = row.find("a")
+            if not link_tag:
+                continue
+
+            full_title = link_tag.get_text(strip=True)
+            href = link_tag.get("href", "")
+            if not href.startswith("http"):
+                href = f"https://bigpara.hurriyet.com.tr{href}"
+
+            # Benzersiz kimlik
+            disc_id = href.rstrip("/").split("-")[-1].replace("/", "")
+
+            items.append({
+                "id": disc_id,
+                "title": full_title,
+                "link": href
+            })
+
+        print(f"Canlı akıştan {len(items)} adet KAP bildirimi başarıyla çekildi.")
+    except Exception as e:
+        print(f"Haber akışı alınırken hata oluştu: {e}")
+
+    return items
 
 def run_kap_scanner():
     acik_hisseler = get_open_positions()
     print(f"Takip Edilen Açık Pozisyonlar: {acik_hisseler}")
 
     if not acik_hisseler:
-        print("Portföyde açık hisse bulunamadı. Tarama tamamlandı.")
+        print("Portföyde açık hisse bulunamadı veya liste boş. Tarama tamamlandı.")
         return
 
     cache_file = "son_bildirimler.json"
@@ -140,24 +136,22 @@ def run_kap_scanner():
                 sent_ids = []
 
     new_sent_ids = list(sent_ids)
-    disclosures = get_recent_kap_disclosures()
+    disclosures = fetch_live_kap_feed()
 
     if not disclosures:
-        print("İncelenecek bildirim akışı alınamadı.")
+        print("Haber listesi boş döndü.")
         return
 
     for item in disclosures:
-        disc_id = str(item.get("disclosureId"))
-        title = item.get("title", "")
-        summary = item.get("summary", "")
-        link = item.get("link", "")
+        disc_id = item["id"]
+        title = item["title"]
+        link = item["link"]
 
-        # Bu bildirim açık hisselerimizden birine mi ait?
+        # 1. Açık hisselerimizden birine ait mi?
         eslesen_hisse = None
         for hisse in acik_hisseler:
-            # Hisse kodunun kelime olarak başlıkta veya özette geçip geçmediğini kontrol eder
-            pattern = rf"\b{re.escape(hisse)}\b"
-            if re.search(pattern, title.upper()) or re.search(pattern, summary.upper()):
+            # Örn: 'THYAO' ibaresini kelime olarak ara
+            if re.search(rf"\b{re.escape(hisse)}\b", title.upper()):
                 eslesen_hisse = hisse
                 break
 
@@ -166,22 +160,22 @@ def run_kap_scanner():
 
         print(f"Açık hisseyle eşleşti: {eslesen_hisse} -> {title}")
 
-        # Daha önce gönderildi mi?
+        # 2. Daha önce iletildi mi?
         if disc_id in sent_ids:
             continue
 
-        # Kritik filtre kontrolü
-        if not is_critical_disclosure(title, summary):
+        # 3. Kritik filtreye uyuyor mu?
+        if not is_critical_disclosure(title, ""):
             print(f"Elenen rutin bildirim: {eslesen_hisse} - {title}")
             new_sent_ids.append(disc_id)
             continue
 
-        # Make.com Webhook iletimi
+        # 4. Make.com Webhook iletimi
         payload = {
             "disclosure_id": disc_id,
             "sembol": eslesen_hisse,
             "baslik": title,
-            "ozet": summary,
+            "ozet": title,
             "kap_link": link,
             "zaman": datetime.now().strftime("%Y-%m-%d %H:%M")
         }
@@ -195,7 +189,6 @@ def run_kap_scanner():
 
         new_sent_ids.append(disc_id)
 
-    # Son 300 bildirimi hafızada sakla
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(new_sent_ids[-300:], f, ensure_ascii=False, indent=2)
 
