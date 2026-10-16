@@ -8,14 +8,15 @@ from datetime import datetime
 
 # ==========================================
 # AYARLAR VE ÇEVRE DEĞİŞKENLERİ
+# (Secrets tanımlı olmasa veya boş gelse bile linki garantiye alan 'or' yapısı)
 # ==========================================
-MAKE_WEBHOOK_URL = os.getenv(
-    "MAKE_WEBHOOK_URL", 
-    "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
+MAKE_WEBHOOK_URL = (
+    os.getenv("MAKE_WEBHOOK_URL") 
+    or "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
 )
-ONEDRIVE_EXCEL_URL = os.getenv(
-    "ONEDRIVE_EXCEL_URL", 
-    "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
+ONEDRIVE_EXCEL_URL = (
+    os.getenv("ONEDRIVE_EXCEL_URL") 
+    or "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
 )
 STATE_FILE = "son_bildirimler.json"
 
@@ -52,7 +53,7 @@ FILTRE_KELIMELER = [
     "devralma"
 ]
 
-HEADERS = {
+KAP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -60,27 +61,26 @@ HEADERS = {
 }
 
 def download_excel_file(url):
-    """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir."""
+    """OneDrive bağlantısını doğrudan saf .xlsx verisine dönüştürerek indirir (Orijinal çalışan sürüm)."""
     session = requests.Session()
     target_url = url if "download=1" in url else f"{url}&download=1"
     
-    for attempt in range(3):
-        try:
-            res = session.get(target_url, headers=HEADERS, allow_redirects=True, timeout=25)
-            if "view.aspx" in res.url:
-                direct_url = res.url.replace("view.aspx", "download.aspx")
-                res = session.get(direct_url, headers=HEADERS, timeout=25)
-                
-            if res.content.startswith(b'PK'):
-                return res.content
+    try:
+        res = session.get(target_url, allow_redirects=True, timeout=25)
+        if "view.aspx" in res.url:
+            direct_url = res.url.replace("view.aspx", "download.aspx")
+            res = session.get(direct_url, timeout=25)
+            
+        if res.content.startswith(b'PK'):
+            return res.content
 
-            live_download_url = "https://onedrive.live.com/download?cid=CB9E9D1C772EF382&resid=CB9E9D1C772EF382!s4cf55af6200c480e929aeaeafbd84749"
-            res_live = session.get(live_download_url, headers=HEADERS, allow_redirects=True, timeout=25)
-            if res_live.content.startswith(b'PK'):
-                return res_live.content
-        except requests.exceptions.RequestException:
-            if attempt < 2:
-                time.sleep(2)
+        live_download_url = "https://onedrive.live.com/download?cid=CB9E9D1C772EF382&resid=CB9E9D1C772EF382!s4cf55af6200c480e929aeaeafbd84749"
+        res_live = session.get(live_download_url, allow_redirects=True, timeout=25)
+        if res_live.content.startswith(b'PK'):
+            return res_live.content
+    except Exception as e:
+        print(f"Excel indirme denemesi sırasında hata: {e}")
+
     return None
 
 def get_open_positions():
@@ -154,7 +154,7 @@ def fetch_company_disclosures(session, hisse_kodu):
     
     for attempt in range(1, 3):
         try:
-            res = session.get(url, params=params, headers=HEADERS, timeout=20)
+            res = session.get(url, params=params, headers=KAP_HEADERS, timeout=20)
             if res.status_code == 200:
                 data = res.json()
                 if isinstance(data, list):
@@ -212,7 +212,6 @@ def main():
             if not bildirim_id or bildirim_id in seen_ids:
                 continue
 
-            # Filtre kontrolü: Sadece değeri etkileyen 5 gruptan birine giriyorsa ilet
             if filtreye_uyuyor_mu(baslik, ozet):
                 kap_link = f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
                 payload = {
@@ -228,7 +227,6 @@ def main():
                     seen_ids.add(bildirim_id)
                     yeni_sayac += 1
             else:
-                # İlgili hisse olsa da rutin evrak olduğu için hafızaya alınıp geçilir
                 seen_ids.add(bildirim_id)
 
     save_seen_ids(seen_ids)
