@@ -4,7 +4,7 @@ on:
   schedule:
     # Her Cumartesi saat 06:30 UTC (Türkiye saati ile 09:30)
     - cron: '30 6 * * 6'
-  workflow_dispatch: # İstediğiniz an GitHub arayüzünden elle tek tıkla test etmek için
+  workflow_dispatch: # GitHub arayüzünden istediğiniz an elle test etmek için
 
 jobs:
   run-ziraat:
