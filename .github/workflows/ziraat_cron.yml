@@ -1,0 +1,27 @@
+name: Haftalik Ziraat Bulten Motoru
+
+on:
+  schedule:
+    # Her Cumartesi saat 06:30 UTC (Türkiye saati ile 09:30)
+    - cron: '30 6 * * 6'
+  workflow_dispatch: # İstediğiniz an GitHub arayüzünden elle tek tıkla test etmek için
+
+jobs:
+  run-ziraat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+
+      - name: Python Ortamını Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Çarpan Motorunu Çalıştır
+        run: python ziraat_carpanlar.py
