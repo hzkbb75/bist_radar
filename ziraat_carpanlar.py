@@ -142,10 +142,35 @@ def carpanlari_isle_ve_gonder():
             "Prospektif_FK": prospektif_fk
         })
 
-       # L, M, N sütunlarına (F/K, PD/DD, Değerleme) sırasıyla yazılacak dizi
-    # l_m_n_matrisi döngüsü bittikten sonra:
+     l_m_n_matrisi = []
 
-    # Microsoft Graph API'nin tam istediği JSON formatını doğrudan Python hazırlar:
+    for hisse in bist100_hisseleri:
+        satir = pdf_satirlari.get(hisse, None)
+        if satir:
+            try:
+                roa = round(sayi_donustur(satir[-8]) / 100, 4)
+                roe = round(sayi_donustur(satir[-7]) / 100, 4)
+                fk = round(sayi_donustur(satir[-6]), 2)
+                pddd = round(sayi_donustur(satir[-5]), 2)
+            except:
+                roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
+        else:
+            roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
+
+        # Değerleme Durumu
+        if (0 < fk < 12) and (0 < pddd < 3):
+            durum = "🎯 İskontolu"
+        elif fk > 25 or pddd > 7:
+            durum = "⚠️ Pahalı"
+        else:
+            durum = "⚖️ Dengeli"
+
+        # L2:N101 için tam 3 eleman: [F/K, PD/DD, Değerleme]
+        l_m_n_matrisi.append([fk, pddd, durum])
+
+    print(f"📊 Hazırlanan Satır Sayısı: {len(l_m_n_matrisi)} / {len(bist100_hisseleri)}")
+
+    # Microsoft Graph API'nin beklediği JSON yapısı (100 satır x 3 sütun)
     hazir_json_body = json.dumps({
         "values": l_m_n_matrisi
     }, ensure_ascii=False)
@@ -158,7 +183,7 @@ def carpanlari_isle_ve_gonder():
 
     res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={"Content-Type": "application/json"})
     if res.status_code == 200:
-        print("🎉 Hazır gövde Make.com'a başarıyla iletildi!")
+        print("🎉 100 hisselik matris Make.com'a başarıyla iletildi!")
     else:
         print(f"⚠️ Hata Kodu: {res.status_code}")
 
