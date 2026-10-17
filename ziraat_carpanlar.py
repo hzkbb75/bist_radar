@@ -142,22 +142,23 @@ def carpanlari_isle_ve_gonder():
             "Prospektif_FK": prospektif_fk
         })
 
-        # L, M, N sütunlarına (F/K, PD/DD, Değerleme) sırasıyla yazılacak dizi
-        l_m_n_matrisi.append([fk, pddd, durum])
+       # L, M, N sütunlarına (F/K, PD/DD, Değerleme) sırasıyla yazılacak dizi
+    # l_m_n_matrisi döngüsü bittikten sonra:
 
-    print(f"✅ PDF'ten Çekilen: {len(guncellenecek_paketler)} / {len(bist100_hisseleri)} hisse")
+    # Microsoft Graph API'nin tam istediği JSON formatını doğrudan Python hazırlar:
+    hazir_json_body = json.dumps({
+        "values": l_m_n_matrisi
+    }, ensure_ascii=False)
 
-    # Make.com'a Gönderilen Paket
     payload = {
         "islem_turu": "Haftalik_Carpan_Guncelleme",
         "tarih": datetime.now().strftime("%d.%m.%Y"),
-        "hisseler": guncellenecek_paketler,
-        "matris": l_m_n_matrisi
+        "hazir_body": hazir_json_body
     }
 
     res = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={"Content-Type": "application/json"})
     if res.status_code == 200:
-        print("🎉 Haftalık çarpanlar Make.com üzerinden Excel'e aktarıldı!")
+        print("🎉 Hazır gövde Make.com'a başarıyla iletildi!")
     else:
         print(f"⚠️ Hata Kodu: {res.status_code}")
 
