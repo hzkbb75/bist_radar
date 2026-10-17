@@ -4,7 +4,6 @@ import os
 import requests
 import pdfplumber
 
-# Make.com taze ve aktif webhook adresi
 WEBHOOK_URL = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf7c"
 PDF_ADI = "bulten.pdf"
 
@@ -90,72 +89,19 @@ def carpanlari_isle_ve_gonder():
                     if kod in bist100_hisseleri:
                         pdf_satirlari[kod] = parcalar
 
-    piotroski_sozluk = {}
-    if os.path.exists("master_bilanco_bist100.csv"):
-        import pandas as pd
-        df_m = pd.read_csv("master_bilanco_bist100.csv")
-        for _, r in df_m.iterrows():
-            piotroski_sozluk[r["Hisse"]] = r["Piotroski_Skor"]
-
-    guncellenecek_paketler = []
-    # Make.com API Call modülü için tek hamlede basılacak matris [L: FK, M: PDDD, N: Durum]
+    # L2:N101 aralığı için matris (100 satır x 3 sütun: F/K, PD/DD, Değerleme)
     l_m_n_matrisi = []
-
-    for hisse in bist100_hisseleri:
-        if hisse in pdf_satirlari:
-            satir = pdf_satirlari[hisse]
-            try:
-                roa = round(sayi_donustur(satir[-8]) / 100, 4)
-                roe = round(sayi_donustur(satir[-7]) / 100, 4)
-                fk = round(sayi_donustur(satir[-6]), 2)
-                pddd = round(sayi_donustur(satir[-5]), 2)
-            except:
-                roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
-        else:
-            roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
-
-        # İskonto Değerlemesi
-        if (0 < fk < 12) and (0 < pddd < 3):
-            durum = "🎯 İskontolu"
-        elif fk > 25 or pddd > 7:
-            durum = "⚠️ Pahalı"
-        else:
-            durum = "⚖️ Dengeli"
-
-        # Prospektif F/K Modeli
-        f_skor = piotroski_sozluk.get(hisse, "-")
-        try:
-            skor_num = float(f_skor)
-            g = (skor_num - 4.5) * 0.06
-            prospektif_fk = round(fk / (1.0 + g), 2) if fk > 0 else 0.0
-            prospektif_fk = max(prospektif_fk, 0.5) if fk > 0 else 0.0
-        except:
-            prospektif_fk = fk
-
-        guncellenecek_paketler.append({
-            "Hisse": hisse,
-            "ROA": roa,
-            "ROE": roe,
-            "FK": fk,
-            "PDDD": pddd,
-            "Durum": durum,
-            "Prospektif_FK": prospektif_fk
-        })
-
-     l_m_n_matrisi = []
 
     for hisse in bist100_hisseleri:
         satir = pdf_satirlari.get(hisse, None)
         if satir:
             try:
-                roa = round(sayi_donustur(satir[-8]) / 100, 4)
-                roe = round(sayi_donustur(satir[-7]) / 100, 4)
                 fk = round(sayi_donustur(satir[-6]), 2)
                 pddd = round(sayi_donustur(satir[-5]), 2)
             except:
-                roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
+                fk, pddd = 0.0, 0.0
         else:
-            roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
+            fk, pddd = 0.0, 0.0
 
         # Değerleme Durumu
         if (0 < fk < 12) and (0 < pddd < 3):
@@ -165,12 +111,11 @@ def carpanlari_isle_ve_gonder():
         else:
             durum = "⚖️ Dengeli"
 
-        # L2:N101 için tam 3 eleman: [F/K, PD/DD, Değerleme]
         l_m_n_matrisi.append([fk, pddd, durum])
 
     print(f"📊 Hazırlanan Satır Sayısı: {len(l_m_n_matrisi)} / {len(bist100_hisseleri)}")
 
-    # Microsoft Graph API'nin beklediği JSON yapısı (100 satır x 3 sütun)
+    # Microsoft Graph API formatı (Values doğrudan 2D matris)
     hazir_json_body = json.dumps({
         "values": l_m_n_matrisi
     }, ensure_ascii=False)
