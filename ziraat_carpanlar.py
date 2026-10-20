@@ -220,11 +220,6 @@ payload = {
         "values": matris_verisi
     }
 }
-payload = {
-    "islem_turu": "Haftalik_Carpan_Guncelleme",
-    "tarih": datetime.now().strftime("%d.%m.%Y"),
-    "hisseler": guncellenecek_paketler
-}
 
 res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"})
 if res.status_code == 200:
