@@ -212,13 +212,12 @@ for h in guncellenecek_paketler:
         h.get("Durum", "-")
     ])
 
+# ziraat_carpanlar.py dosyasındaki 215-222. satırlar arası:
 payload = {
     "islem_turu": "Haftalik_Carpan_Guncelleme",
     "tarih": datetime.now().strftime("%d.%m.%Y"),
     "hisseler": guncellenecek_paketler,
-    "hazir_body_zb": {
-        "values": matris_verisi
-    }
+    "hazir_body_zb": json.dumps({"values": matris_verisi})
 }
 
 res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"})
