@@ -203,6 +203,23 @@ for hisse in bist100_hisseleri:
 print(f"✅ PDF'ten Çekilen: {len(guncellenecek_paketler)} / {len(bist100_hisseleri)} hisse")
 
 # --- 5. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
+# Excel'deki L (F/K), M (PD/DD), N (Değerleme Durumu) sütunlarına basılacak 2 boyutlu matris
+matris_verisi = []
+for h in guncellenecek_paketler:
+    matris_verisi.append([
+        h.get("FK", "-"),
+        h.get("PDDD", "-"),
+        h.get("Durum", "-")
+    ])
+
+payload = {
+    "islem_turu": "Haftalik_Carpan_Guncelleme",
+    "tarih": datetime.now().strftime("%d.%m.%Y"),
+    "hisseler": guncellenecek_paketler,
+    "hazir_body_zb": {
+        "values": matris_verisi
+    }
+}
 payload = {
     "islem_turu": "Haftalik_Carpan_Guncelleme",
     "tarih": datetime.now().strftime("%d.%m.%Y"),
