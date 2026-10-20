@@ -246,7 +246,7 @@ print("🚀 Çeyreklik Bilanço Motoru Başlatıldı...")
 for sira, hisse in enumerate(bist100_hisseleri, 1):
   ticker = yf.Ticker(f"{hisse}.IS")
 
-  # --- A. FİNANS HİSSELERİ (TICKER.INFO İLE ROA / ROE ÇEKİMİ) ---
+  # --- A. FİNANS HİSSELERİ (TICKER.INFO İLE ROA / ROE ÇEKİMİ VE SKORLAMA) ---
   if hisse in finans_hisseleri:
     roa_val = 0.0
     roe_val = 0.0
@@ -265,6 +265,27 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
     except Exception:
       pass
 
+    # Finans Hisseleri İçin 0-100 Temel Skor (ROE 50p, ROA 50p)
+    p_roe = (
+        50
+        if roe_val >= 0.35
+        else (
+            35
+            if roe_val >= 0.25
+            else (20 if roe_val >= 0.15 else (5 if roe_val > 0 else 0))
+        )
+    )
+    p_roa = (
+        50
+        if roa_val >= 0.03
+        else (
+            35
+            if roa_val >= 0.02
+            else (20 if roa_val >= 0.01 else (5 if roa_val > 0 else 0))
+        )
+    )
+    finans_skor = int(p_roe + p_roa)
+
     master_veritabani.append({
         "Hisse": hisse,
         "Piotroski_Skor": "-",
@@ -275,7 +296,8 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
         "Net_Kar_Marji": 0.0,
         "Aktif_Devir": 0.0,
         "Kaldirac": 0.0,
-        "Iliskili_Taraf": "✅ Finans / Muaf",
+        "Temel_Skor": finans_skor,  # P Sütunu
+        "Iliskili_Taraf": "✅ Finans / Muaf",  # Q Sütunu
     })
     time.sleep(0.15)
     continue
@@ -308,6 +330,17 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
     ozkaynak_t = getir_deger(bs, "Stockholders Equity", idx_t)
     gecmis_kar_t = getir_deger(bs, "Retained Earnings", idx_t)
 
+    # VİDEODAKİ KRİTİK FİLTRE: Diğer Alacaklar (Ortağa / İlişkiliye Borç Verme Kalemi)
+    diger_alacak_t = getir_deger(bs, "Other Receivables", idx_t)
+    alacak_orani = (diger_alacak_t / donen_t) if donen_t > 0 else 0.0
+
+    if alacak_orani > 0.15:
+      iliskili_durumu = f"🚨 RİSKLİ (%{alacak_orani*100:.1f})"
+    elif alacak_orani > 0.05:
+      iliskili_durumu = f"⚠️ Dikkat (%{alacak_orani*100:.1f})"
+    else:
+      iliskili_durumu = "✅ Temiz"
+
     hasilat_t = getir_deger(inc, "Total Revenue", idx_t)
     hasilat_t1 = getir_deger(inc, "Total Revenue", idx_t1)
     brut_kar_t = getir_deger(inc, "Gross Profit", idx_t)
@@ -316,7 +349,7 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
     net_kar_t1 = getir_deger(inc, "Net Income", idx_t1)
     ebit_t = getir_deger(inc, "EBIT", idx_t)
 
-    # TTM (Son 4 Çeyrek) Net Kâr Hesabı (ROA / ROE yıllıklandırması için)
+    # TTM Net Kâr Hesabı (Yıllıklandırma)
     if "Net Income" in inc.index:
       net_kar_serisi = inc.loc["Net Income"].dropna()
       if len(net_kar_serisi) >= 4:
@@ -330,6 +363,10 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
 
     roa_hesap = round(net_kar_ttm / varlik_t, 4) if varlik_t else 0.0
     roe_hesap = round(net_kar_ttm / ozkaynak_t, 4) if ozkaynak_t else 0.0
+    brut_marj = round(brut_kar_t / hasilat_t, 4) if hasilat_t else 0.0
+    net_kar_marji = round(net_kar_t / hasilat_t, 4) if hasilat_t else 0.0
+    aktif_devir = round(hasilat_t / varlik_t, 2) if varlik_t else 0.0
+    kaldirac = round(toplam_borc_t / varlik_t, 2) if varlik_t else 0.0
 
     cfo_t = (
         getir_deger(cf, "Operating Cash Flow", idx_t)
@@ -382,17 +419,59 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
     z_val = (6.56 * x1) + (3.26 * x2) + (6.72 * x3) + (1.05 * x4)
     z_val = max(min(z_val, 15.0), -5.0)
 
+    # --- SANAYİ ŞİRKETLERİ İÇİN 0-100 TEMEL SKOR MODELİ ---
+    p_pio = round((piotroski / 9.0) * 20.0)  # 20 Puan
+    p_alt = (
+        15 if z_val >= 2.99 else (8 if z_val >= 1.81 else 0)
+    )  # 15 Puan (Altman Z)
+    p_roe_s = (
+        20
+        if roe_hesap >= 0.30
+        else (
+            12
+            if roe_hesap >= 0.15
+            else (5 if roe_hesap >= 0.0 else 0)
+        )
+    )  # 20 Puan
+    p_roa_s = (
+        15
+        if roa_hesap >= 0.10
+        else (
+            10
+            if roa_hesap >= 0.05
+            else (4 if roa_hesap >= 0.0 else 0)
+        )
+    )  # 15 Puan
+    p_marj = (
+        10
+        if net_kar_marji >= 0.15
+        else (6 if net_kar_marji >= 0.07 else (2 if net_kar_marji > 0 else 0))
+    )  # 10 Puan
+    p_kald = (
+        10 if kaldirac <= 0.50 else (5 if kaldirac <= 0.70 else 0)
+    )  # 10 Puan
+    p_devir = (
+        10 if aktif_devir >= 1.0 else (6 if aktif_devir >= 0.6 else 2)
+    )  # 10 Puan
+
+    temel_skor = p_pio + p_alt + p_roe_s + p_roa_s + p_marj + p_kald + p_devir
+
+    # VİDEO CEZASI: Gruba borç aktarımı %5'i aştıysa skordan 25 puan kırılır
+    if alacak_orani > 0.05:
+      temel_skor = max(0, temel_skor - 25)
+
     master_veritabani.append({
         "Hisse": hisse,
         "Piotroski_Skor": int(piotroski),
         "Altman_Z": round(z_val, 2),
         "ROA": roa_hesap,
-        "Brut_Marj": round(brut_kar_t / hasilat_t, 4) if hasilat_t else 0.0,
+        "Brut_Marj": brut_marj,
         "ROE": roe_hesap,
-        "Net_Kar_Marji": round(net_kar_t / hasilat_t, 4) if hasilat_t else 0.0,
-        "Aktif_Devir": round(hasilat_t / varlik_t, 2) if varlik_t else 0.0,
-        "Kaldirac": round(toplam_borc_t / varlik_t, 2) if varlik_t else 0.0,
-        "Iliskili_Taraf": "✅ Temiz",
+        "Net_Kar_Marji": net_kar_marji,
+        "Aktif_Devir": aktif_devir,
+        "Kaldirac": kaldirac,
+        "Temel_Skor": int(temel_skor),  # P Sütunu
+        "Iliskili_Taraf": iliskili_durumu,  # Q Sütunu
     })
   except Exception:
     master_veritabani.append({
@@ -405,6 +484,7 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
         "Net_Kar_Marji": 0.0,
         "Aktif_Devir": 0.0,
         "Kaldirac": 0.0,
+        "Temel_Skor": 0,
         "Iliskili_Taraf": "✅ Temiz",
     })
 
@@ -413,7 +493,7 @@ for sira, hisse in enumerate(bist100_hisseleri, 1):
 df_m = pd.DataFrame(master_veritabani)
 df_m.to_csv("master_bilanco_bist100.csv", index=False, encoding="utf-8-sig")
 
-# Excel Çıktısı (A'dan S'ye eksiksiz şablon)
+# Excel Çıktısı (A'dan S'ye eksiksiz şablon, P = Temel Skor, Q = İlişkili Taraf)
 sablon = pd.DataFrame()
 sablon["Tarih"] = [datetime.now().strftime("%d.%m.%Y")] * len(df_m)
 sablon["Hisse"] = df_m["Hisse"]
@@ -430,11 +510,11 @@ sablon["F/K Oranı"] = ""
 sablon["PD/DD Oranı"] = ""
 sablon["Değerleme Durumu"] = ""
 sablon["Pozisyon Durumu"] = ""
-sablon["Tetik Bölgesi"] = ""
-sablon["İlişkili Taraf Durumu"] = df_m["Iliskili_Taraf"]
+sablon["Temel Skor"] = df_m["Temel_Skor"]  # <--- P SÜTUNU (0-100 Puan)
+sablon["İlişkili Taraf Durumu"] = df_m["Iliskili_Taraf"]  # <--- Q SÜTUNU (Dinamik)
 sablon["Prospektif F/K"] = ""
 
 sablon.to_excel(
-    'Temel_Analiz_Omurga.xlsx', sheet_name='Temel_Analiz', index=False
+    "Temel_Analiz_Omurga.xlsx", sheet_name="Temel_Analiz", index=False
 )
 print("🎉 Çeyreklik Motor Tamamlandı! 'Temel_Analiz_Omurga.xlsx' hazır.")
