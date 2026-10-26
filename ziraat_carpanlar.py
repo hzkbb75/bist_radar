@@ -179,20 +179,28 @@ for h in hisse_verileri:
 print(f"✅ Filtreden Geçen ve Temizlenen Hisse Sayısı: {len(guncellenecek_paketler)}")
 
 # --- 7. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
+# Hisseleri alfabetik sıraya diziyoruz
+guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
+
 matris_verisi = []
 for h in guncellenecek_paketler:
     matris_verisi.append([h["FK"], h["PDDD"], h["Durum"]])
+
+# Dinamik bitiş satırı: Başlangıç 2 olduğu için eleman sayısı + 1
+bitis_satiri = len(matris_verisi) + 1
+dinamik_aralik = f"L2:N{bitis_satiri}"
 
 payload = {
     "islem_turu": "Haftalik_Carpan_Guncelleme",
     "tarih": datetime.now().strftime("%d.%m.%Y"),
     "hisseler": guncellenecek_paketler,
+    "range_adresi": dinamik_aralik,
     "hazir_body_zb": json.dumps({"values": matris_verisi})
 }
 
 res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"})
 if res.status_code == 200:
-    print("🎉 BİST TÜM Çarpanları Make.com üzerinden Excel'e aktarıldı!")
+    print(f"🎉 BİST TÜM Çarpanları ({dinamik_aralik} aralığına) Make.com üzerinden Excel'e aktarıldı!")
 else:
     print(f"⚠️ Make.com Yanıt Kodu: {res.status_code}")
 
