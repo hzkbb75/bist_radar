@@ -1,9 +1,10 @@
 # ==============================================================================
-# HAFTALIK ZİRAAT PİYASA ÇARPANLARI & TELEGRAM BÜLTEN MOTORU
+# HAFTALIK ZİRAAT BİST TÜM PİYASA ÇARPANLARI & OTOMATİK ELEME MOTORU
 # ==============================================================================
 import os
 import json
 import requests
+import statistics
 from datetime import datetime, timedelta
 
 # --- 1. KURULUM KONTROLÜ ---
@@ -16,79 +17,9 @@ except ImportError:
 
 # --- 2. AYARLAR & ENTEGRASYONLAR ---
 MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf7c"
-
-# Telegram Bildirimi (GitHub Secrets veya doğrudan değer)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8897693829:AAEHKHoRKSN-h3RRRU60bDCq3wcuLstivI4")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "932085366")
 PDF_DOSYA_ADI = "bulten.pdf"
-
-bist100_hisseleri = [
-    "AEFES", "AGHOL", "AHGAZ", "AKBNK", "AKCNS", "AKFYE", "AKSA", "AKSEN", "ALARK", "ALBRK",
-    "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ASELS", "ASTOR", "AYGAZ", "BERA", "BIMAS", "BINHO",
-    "BRSAN", "BRYAT", "BTCIM", "CANTE", "CCOLA", "CIMSA", "CVKMD", "CWENE", "DOAS", "DOHOL",
-    "ECILC", "ECZYT", "EGEEN", "EGGUB", "EKGYO", "ENERY", "ENJSA", "ENKAI", "ENTRA", "EREGL",
-    "EUREN", "FENER", "FROTO", "GARAN", "GLRMK", "GLYHO", "GRSEL", "GUBRF", "GWIND", "HALKB",
-    "HEKTS", "ISCTR", "ISDMR", "ISMEN", "KARSN", "KATMR", "KCAER", "KCHOL", "KORDS", "KRDMD",
-    "LMKDC", "MAVI", "MGROS", "MPARK", "OBAMS", "ODAS", "OTKAR", "OYAKC", "PAHOL", "PETKM",
-    "PGSUS", "RGYAS", "RYSAS", "SAHOL", "SASA", "SISE", "SNGYO", "SOKM", "TABGD", "TAVHL",
-    "TCELL", "TCKRC", "THYAO", "TKFEN", "TOASO", "TRALT", "TRENJ", "TRGYO", "TRMET", "TSKB",
-    "TTKOM", "TTRAK", "TUKAS", "TUPRS", "TURSG", "ULKER", "VAKBN", "VESTL", "YKBNK", "ZOREN"
-]
-
-hisse_sektor = {
-    "AKBNK": "Bankacılık", "ALBRK": "Bankacılık", "GARAN": "Bankacılık", "HALKB": "Bankacılık",
-    "ISCTR": "Bankacılık", "TSKB": "Bankacılık", "VAKBN": "Bankacılık", "YKBNK": "Bankacılık",
-    "ISMEN": "Menkul Değerler", "ANHYT": "Sigorta", "ANSGR": "Sigorta", "TURSG": "Sigorta",
-    "AGHOL": "Holding", "ALARK": "Holding", "BERA": "Holding", "DOHOL": "Holding",
-    "ECZYT": "Holding", "GLYHO": "Holding", "KCHOL": "Holding", "PAHOL": "Holding", "SAHOL": "Holding",
-    "THYAO": "Havayolu", "PGSUS": "Havayolu", "TAVHL": "Havayolu", "GRSEL": "Lojistik", "RYSAS": "Lojistik",
-    "AHGAZ": "Enerji", "AKFYE": "Enerji", "AKSEN": "Enerji", "ASTOR": "Enerji", "AYGAZ": "Enerji",
-    "CANTE": "Enerji", "CWENE": "Enerji", "ENERY": "Enerji", "ENJSA": "Enerji", "ENTRA": "Enerji",
-    "GWIND": "Enerji", "ODAS": "Enerji", "TUPRS": "Petrol & Kimya", "ZOREN": "Enerji",
-    "AEFES": "İçecek", "CCOLA": "İçecek", "BIMAS": "Perakende", "MGROS": "Perakende", "SOKM": "Perakende",
-    "OBAMS": "Gıda", "TABGD": "Gıda", "TUKAS": "Gıda", "ULKER": "Gıda",
-    "DOAS": "Otomotiv", "FROTO": "Otomotiv", "KARSN": "Otomotiv", "KATMR": "Otomotiv",
-    "OTKAR": "Otomotiv", "TOASO": "Otomotiv", "TTRAK": "Otomotiv",
-    "BRSAN": "Demir Çelik", "BRYAT": "Holding", "EREGL": "Demir Çelik", "ISDMR": "Demir Çelik",
-    "KCAER": "Demir Çelik", "KRDMD": "Demir Çelik", "AKCNS": "Çimento", "BTCIM": "Çimento",
-    "CIMSA": "Çimento", "LMKDC": "Çimento", "OYAKC": "Çimento", "EUREN": "Cam & Seramik", "SISE": "Cam & Seramik",
-    "AKSA": "Kimya", "GUBRF": "Kimya", "HEKTS": "Kimya", "KORDS": "Kimya", "PETKM": "Petrol & Kimya", "SASA": "Kimya",
-    "ASELS": "Savunma", "ALTNY": "Savunma", "BINHO": "Holding", "TCELL": "Telekom", "TTKOM": "Telekom",
-    "EKGYO": "GYO", "RGYAS": "GYO", "SNGYO": "GYO", "TRGYO": "GYO", "CVKMD": "Madencilik",
-    "EGEEN": "Otomotiv Yan Sanayi", "EGGUB": "Kimya", "TRALT": "Madencilik", "TRMET": "Madencilik",
-    "ECILC": "İlaç & Sağlık", "MPARK": "İlaç & Sağlık", "MAVI": "Perakende", "ARCLK": "Dayanıklı Tüketim",
-    "VESTL": "Dayanıklı Tüketim", "ENKAI": "İnşaat", "FENER": "Spor", "GLRMK": "İnşaat",
-    "TCKRC": "Demir Çelik", "TKFEN": "Holding", "TRENJ": "Enerji"
-}
-
-sektor_medyanlari = {
-    "Bankacılık": {"fk": 5.23, "pddd": 1.01},
-    "Holding": {"fk": 14.01, "pddd": 0.71},
-    "Demir Çelik": {"fk": 26.56, "pddd": 0.87},
-    "Otomotiv": {"fk": 8.82, "pddd": 1.36},
-    "Otomotiv Yan Sanayi": {"fk": 13.33, "pddd": 0.83},
-    "Gıda": {"fk": 12.02, "pddd": 1.27},
-    "İçecek": {"fk": 11.01, "pddd": 1.52},
-    "Perakende": {"fk": 24.02, "pddd": 1.80},
-    "Dayanıklı Tüketim": {"fk": 14.07, "pddd": 0.47},
-    "Çimento": {"fk": 19.80, "pddd": 0.99},
-    "Cam & Seramik": {"fk": 12.20, "pddd": 0.68},
-    "Kimya": {"fk": 9.70, "pddd": 0.98},
-    "Petrol & Kimya": {"fk": 10.05, "pddd": 1.27},
-    "Savunma": {"fk": 24.57, "pddd": 4.79},
-    "Telekom": {"fk": 7.92, "pddd": 0.78},
-    "Enerji": {"fk": 14.34, "pddd": 1.15},
-    "GYO": {"fk": 0.0, "pddd": 0.48},
-    "Havayolu": {"fk": 6.77, "pddd": 0.32},
-    "Lojistik": {"fk": 67.41, "pddd": 1.29},
-    "İlaç & Sağlık": {"fk": 26.01, "pddd": 0.62},
-    "İnşaat": {"fk": 11.89, "pddd": 1.32},
-    "Madencilik": {"fk": 13.89, "pddd": 2.47},
-    "Menkul Değerler": {"fk": 4.78, "pddd": 0.92},
-    "Sigorta": {"fk": 3.93, "pddd": 1.53},
-    "Spor": {"fk": 0.0, "pddd": 0.74}
-}
 
 # --- 3. BÜLTENİ OTOMATİK İNDİRME ---
 def bulten_indir(hedef_dosya="bulten.pdf"):
@@ -113,32 +44,95 @@ def bulten_indir(hedef_dosya="bulten.pdf"):
     return False
 
 def sayi_donustur(deger):
-    if not deger or deger == "a.d.":
-        return 0.0
+    if not deger or deger == "a.d.": return 0.0
     temiz = str(deger).replace("%", "").replace(".", "").replace(",", ".").strip()
-    try:
-        return float(temiz)
-    except:
-        return 0.0
+    try: return float(temiz)
+    except: return 0.0
 
-# --- 4. MOTOR ÇALIŞTIRMA ---
-print("🚀 Haftalık Motor Başlatıldı...")
+# --- 4. DİNAMİK PARÇALAMA & VETO MOTORU ---
+print("🚀 BİST TÜM Motoru Başlatıldı...")
 if not bulten_indir(PDF_DOSYA_ADI):
     raise FileNotFoundError("❌ Ziraat bülteni indirilemedi, işlem durduruldu.")
 
-pdf_satirlari = {}
+hisse_verileri = []
+aktif_pazar = "YILDIZ_ANA"
+aktif_sektor = "GENEL"
+
 with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
     for page in pdf.pages:
         metin = page.extract_text()
-        if not metin:
-            continue
+        if not metin: continue
+        
         for satir in metin.split("\n"):
-            parcalar = satir.split()
-            if parcalar:
-                kod = parcalar[-1].upper()
-                if kod in bist100_hisseleri:
-                    pdf_satirlari[kod] = parcalar
+            satir_upper = satir.upper().strip()
+            
+            # --- VETO 1: PAZAR KONTROLÜ ---
+            if "YAKIN İZLEME PAZARI" in satir_upper:
+                aktif_pazar = "YIP"
+                continue
+            elif "ALT PAZAR" in satir_upper:
+                aktif_pazar = "ALT"
+                continue
+            elif "PİYASA ÖNCESİ" in satir_upper:
+                aktif_pazar = "POIP"
+                continue
+            elif "YATIRIM ORTAKLIKLARI" in satir_upper: # GYO Hariç YO'lar elenir
+                aktif_pazar = "YO"
+                continue
 
+            parcalar = satir.split()
+            
+            # --- SEKTÖR BAŞLIĞI TESPİTİ ---
+            if 0 < len(parcalar) <= 4 and satir_upper == satir.strip() and not any(c.isdigit() for c in satir):
+                if satir_upper not in ["BİST-TÜM", "BİST-100", "BİST-30", "NOTLAR"]:
+                    aktif_sektor = satir_upper
+                    # Eğer yeni sektör başlarken pazar YİP veya ALT ise, artık normal pazara dönmüş olabilir
+                    # (Ziraat Bülten formatında pazar başlıkları sektörleri ezer)
+                continue
+
+            # --- HİSSE VERİSİ TESPİTİ ---
+            if len(parcalar) >= 10:
+                kod = parcalar[-1].upper()
+                # Ticker validasyonu (4-5 harf, sadece alfabetik)
+                if len(kod) in [4, 5] and kod.isalpha():
+                    # Kırmızı Çizgi Veto: Alt Pazar, YİP ve YO'lar listeye asla giremez
+                    if aktif_pazar in ["YIP", "ALT", "POIP", "YO"]:
+                        continue 
+                    
+                    try:
+                        # Ziraat Bülten Standart Sütun Konumları
+                        roa = sayi_donustur(parcalar[-8])
+                        roe = sayi_donustur(parcalar[-7])
+                        fk = sayi_donustur(parcalar[-6])
+                        pddd = sayi_donustur(parcalar[-5])
+                        
+                        hisse_verileri.append({
+                            "Hisse": kod,
+                            "Sektor": aktif_sektor,
+                            "ROA": roa,
+                            "ROE": roe,
+                            "FK": fk,
+                            "PDDD": pddd
+                        })
+                    except:
+                        pass
+
+# --- 5. DİNAMİK SEKTÖR MEDYANLARI (OTOMATİK HESAPLAMA) ---
+sektor_havuzu = {}
+for h in hisse_verileri:
+    s = h["Sektor"]
+    if s not in sektor_havuzu:
+        sektor_havuzu[s] = {"fk_list": [], "pddd_list": []}
+    if h["FK"] > 0: sektor_havuzu[s]["fk_list"].append(h["FK"])
+    if h["PDDD"] > 0: sektor_havuzu[s]["pddd_list"].append(h["PDDD"])
+
+sektor_medyanlari = {}
+for s, vals in sektor_havuzu.items():
+    m_fk = statistics.median(vals["fk_list"]) if vals["fk_list"] else 12.0
+    m_pddd = statistics.median(vals["pddd_list"]) if vals["pddd_list"] else 1.5
+    sektor_medyanlari[s] = {"fk": m_fk, "pddd": m_pddd}
+
+# --- 6. DEĞERLEME & PIOTROSki ENTEGRASYONU ---
 piotroski_sozluk = {}
 if os.path.exists("master_bilanco_bist100.csv"):
     import pandas as pd
@@ -147,72 +141,48 @@ if os.path.exists("master_bilanco_bist100.csv"):
         piotroski_sozluk[r["Hisse"]] = r["Piotroski_Skor"]
 
 guncellenecek_paketler = []
+for h in hisse_verileri:
+    hisse = h["Hisse"]
+    sektor = h["Sektor"]
+    fk = h["FK"]
+    pddd = h["PDDD"]
+    
+    sec_fk = sektor_medyanlari[sektor]["fk"]
+    sec_pddd = sektor_medyanlari[sektor]["pddd"]
 
-for hisse in bist100_hisseleri:
-    if hisse in pdf_satirlari:
-        satir = pdf_satirlari[hisse]
-        try:
-            roa = round(sayi_donustur(satir[-8]) / 100, 4)
-            roe = round(sayi_donustur(satir[-7]) / 100, 4)
-            fk = round(sayi_donustur(satir[-6]), 2)
-            pddd = round(sayi_donustur(satir[-5]), 2)
-        except:
-            roa, roe, fk, pddd = 0.0, 0.0, 0.0, 0.0
+    # Banka ve GYO'larda sadece PD/DD dikkate alınır
+    if "BANKA" in sektor or "GAYRİMENKUL" in sektor:
+        oran = (pddd / sec_pddd) if (pddd > 0 and sec_pddd > 0) else 1.0
+    else:
+        bilesenler = []
+        if fk > 0 and sec_fk > 0: bilesenler.append(fk / sec_fk)
+        if pddd > 0 and sec_pddd > 0: bilesenler.append(pddd / sec_pddd)
+        oran = (sum(bilesenler) / len(bilesenler)) if bilesenler else 1.0
 
-        sektor = hisse_sektor.get(hisse, "Diğer")
-        medyan = sektor_medyanlari.get(sektor, {"fk": 12.0, "pddd": 1.5})
-        sec_fk = medyan.get("fk", 0.0)
-        sec_pddd = medyan.get("pddd", 0.0)
+    if oran <= 0.85: durum = "🟢 İskontolu"
+    elif oran <= 1.15: durum = "🟡 Dengeli"
+    else: durum = "🔴 Pahalı"
 
-        if sektor in ["GYO", "Bankacılık"]:
-            oran = (pddd / sec_pddd) if (pddd > 0 and sec_pddd > 0) else 1.0
-        else:
-            bilesenler = []
-            if fk > 0 and sec_fk > 0:
-                bilesenler.append(fk / sec_fk)
-            if pddd > 0 and sec_pddd > 0:
-                bilesenler.append(pddd / sec_pddd)
-            oran = (sum(bilesenler) / len(bilesenler)) if bilesenler else 1.0
+    f_skor = piotroski_sozluk.get(hisse, "-")
+    try:
+        skor_num = float(f_skor)
+        g = (skor_num - 4.5) * 0.06
+        prospektif_fk = round(fk / (1.0 + g), 2) if fk > 0 else 0.0
+        prospektif_fk = max(prospektif_fk, 0.5) if fk > 0 else 0.0
+    except:
+        prospektif_fk = fk
 
-        if oran <= 0.85:
-            durum = "🟢 İskontolu"
-        elif oran <= 1.15:
-            durum = "🟡 Dengeli"
-        else:
-            durum = "🔴 Pahalı"
+    h["Durum"] = durum
+    h["Prospektif_FK"] = prospektif_fk
+    guncellenecek_paketler.append(h)
 
-        f_skor = piotroski_sozluk.get(hisse, "-")
-        try:
-            skor_num = float(f_skor)
-            g = (skor_num - 4.5) * 0.06
-            prospektif_fk = round(fk / (1.0 + g), 2) if fk > 0 else 0.0
-            prospektif_fk = max(prospektif_fk, 0.5) if fk > 0 else 0.0
-        except:
-            prospektif_fk = fk
+print(f"✅ Filtreden Geçen ve Temizlenen Hisse Sayısı: {len(guncellenecek_paketler)}")
 
-        guncellenecek_paketler.append({
-            "Hisse": hisse,
-            "ROA": roa,
-            "ROE": roe,
-            "FK": fk,
-            "PDDD": pddd,
-            "Durum": durum,
-            "Prospektif_FK": prospektif_fk
-        })
-
-print(f"✅ PDF'ten Çekilen: {len(guncellenecek_paketler)} / {len(bist100_hisseleri)} hisse")
-
-# --- 5. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
-# Excel'deki L (F/K), M (PD/DD), N (Değerleme Durumu) sütunlarına basılacak 2 boyutlu matris
+# --- 7. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
 matris_verisi = []
 for h in guncellenecek_paketler:
-    matris_verisi.append([
-        h.get("FK", "-"),
-        h.get("PDDD", "-"),
-        h.get("Durum", "-")
-    ])
+    matris_verisi.append([h["FK"], h["PDDD"], h["Durum"]])
 
-# ziraat_carpanlar.py dosyasındaki 215-222. satırlar arası:
 payload = {
     "islem_turu": "Haftalik_Carpan_Guncelleme",
     "tarih": datetime.now().strftime("%d.%m.%Y"),
@@ -222,34 +192,26 @@ payload = {
 
 res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"})
 if res.status_code == 200:
-    print("🎉 Çarpanlar Make.com üzerinden Excel'e aktarıldı!")
+    print("🎉 BİST TÜM Çarpanları Make.com üzerinden Excel'e aktarıldı!")
 else:
     print(f"⚠️ Make.com Yanıt Kodu: {res.status_code}")
 
-# --- 6. TELEGRAM BÜLTENİ GÖNDERİMİ ---
+# --- 8. TELEGRAM BÜLTENİ GÖNDERİMİ ---
 iskontolular = [x for x in guncellenecek_paketler if x["Durum"] == "🟢 İskontolu" and x["FK"] > 0]
 iskontolular.sort(key=lambda x: x["FK"])
-top_5 = iskontolular[:5]
+top_10 = iskontolular[:10]
 
-mesaj = f"📊 *HAFTALIK ZİRAAT BİST 100 DEĞERLEME RAPORU*\n"
-mesaj += f"📅 Tarih: {datetime.now().strftime('%d.%m.%Y')}\n\n"
-mesaj += "🏆 *Sektörüne Göre En İskontolu 5 Hisse:*\n"
-for h in top_5:
-    mesaj += f"• *{h['Hisse']}*: F/K: `{h['FK']}` | PD/DD: `{h['PDDD']}` | Pr. F/K: `{h['Prospektif_FK']}`\n"
+mesaj = f"📊 *BİST TÜM HAFTALIK DEĞERLEME RAPORU*\n"
+mesaj += f"📅 Tarih: {datetime.now().strftime('%d.%m.%Y')}\n"
+mesaj += f"🔎 Analiz Edilen Temiz Hisse: `{len(guncellenecek_paketler)}`\n\n"
+mesaj += "🏆 *En İskontolu Top 10 Fırsat (Sektörüne Göre):*\n"
+for h in top_10:
+    mesaj += f"• *{h['Hisse']}* ({h['Sektor']}): F/K: `{h['FK']}` | PD/DD: `{h['PDDD']}`\n"
 
-mesaj += f"\n✅ Toplam `{len(iskontolular)}` hisse sektörüne göre iskontolu bölgede.\n"
-mesaj += "📁 Canlı Excel dosyası güncellendi."
+mesaj += f"\n✅ Toplam `{len(iskontolular)}` hisse değerleme açısından iskontolu bölgede."
 
-BOT_TOKEN = "8897693829:AAEHKHoRKSN-h3RRRU60bDCq3wcuLstivI4"
-CHAT_ID = 932085366
-
-tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 try:
-    tg_res = requests.post(
-        tg_url,
-        json={"chat_id": CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}
-    )
-    if tg_res.status_code == 200:
-        print("📲 Telegram bülteni başarıyla gönderildi!")
+    requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "Markdown"})
 except Exception as e:
     print(f"⚠️ Telegram gönderim hatası: {e}")
