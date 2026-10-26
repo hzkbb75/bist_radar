@@ -517,36 +517,43 @@ print("🎉 Çeyreklik Motor Tamamlandı! Dosyalar hazırlandı.")
 # ==============================================================================
 print("📡 Canlı Excel için Make.com Webhook'una veri gönderiliyor...")
 
-# A2:K101 için 2 boyutlu değerler matrisi
-blok_ak = sablon[[
-    "Tarih",
-    "Hisse",
-    "Piotroski Skoru",
-    "Altman Z",
-    "ROA",
-    "Brüt Marj",
-    "ROE",
-    "Net Kar Marjı",
-    "Aktif Devir Hızı",
-    "Kaldıraç Oranı",
-    "Sektör",
+# Yeni mimari (Bilanco_Ham_Veri) için tek bir birleşik matris oluşturuyoruz.
+# Toplam 12 Sütun: A'dan L'ye kadar.
+blok_ham_veri = sablon[[
+    "Hisse", 
+    "Piotroski Skoru", 
+    "Altman Z", 
+    "ROA", 
+    "Brüt Marj", 
+    "ROE", 
+    "Net Kar Marjı", 
+    "Aktif Devir Hızı", 
+    "Kaldıraç Oranı", 
+    "Sektör", 
+    "Temel Skor", 
+    "İlişkili Taraf Durumu"
 ]].values.tolist()
 
-# P2:Q101 için 2 boyutlu değerler matrisi
-blok_pq = sablon[["Temel Skor", "İlişkili Taraf Durumu"]].values.tolist()
+# Dinamik satır sayısını belirliyoruz
+bitis_satiri = len(blok_ham_veri) + 1
+dinamik_aralik = f"A2:L{bitis_satiri}"
 
 payload = {
-    "hazir_body_ak": json.dumps({"values": blok_ak}),
-    "hazir_body_pq": json.dumps({"values": blok_pq}),
+    "islem_turu": "Ceyreklik_Bilanco_Guncelleme",
+    "range_adresi": dinamik_aralik,
+    "hazir_body_bilanco": json.dumps({"values": blok_ham_veri})
 }
 
 try:
-  resp = requests.post(
-      MAKE_BILANCO_WEBHOOK,
-      json=payload,
-      headers={"Content-Type": "application/json"},
-      timeout=30,
-  )
-  print(f"✅ Webhook Başarılı! HTTP Kodu: {resp.status_code}")
+    resp = requests.post(
+        MAKE_BILANCO_WEBHOOK,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        timeout=30,
+    )
+    if resp.status_code == 200:
+        print(f"🎉 Bilanço verileri ({dinamik_aralik} aralığına) Make.com'a başarıyla gönderildi!")
+    else:
+        print(f"⚠️ Webhook Başarısız! HTTP Kodu: {resp.status_code}")
 except Exception as e:
-  print(f"⚠️ Webhook gönderim hatası: {e}")
+    print(f"⚠️ Webhook gönderim hatası: {e}")
