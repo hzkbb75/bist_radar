@@ -33,7 +33,6 @@ bist100_yedek = [
 
 print("🔍 Ziraat Bülteni PDF'i Bilanço Motoru için anlık taranıyor...")
 try:
-    # PDF'i indir
     url = "https://www.ziraatyatirim.com.tr/arastirma-raporlari/haftalik-hisse-senedi-carpanlari"
     res = requests.get(url, verify=False)
     pdf_link_match = re.search(r'href="(/Files/.*?\.pdf)"', res.text)
@@ -43,7 +42,6 @@ try:
     with open("temp_bilanco_ziraat.pdf", "wb") as f:
         f.write(pdf_res.content)
         
-    # PDF'den hisse kodlarını çıkar
     doc = fitz.open("temp_bilanco_ziraat.pdf")
     all_text = ""
     for page in doc:
@@ -54,7 +52,6 @@ try:
     for i in range(len(satirlar) - 2):
         row = satirlar[i].strip()
         if re.match(r'^[A-Z]{4,5}$', row) and len(row) <= 5:
-            # Yanında değer olup olmadığını kontrol et (sığ tahtaları elemek için)
             try:
                 pddd_kontrol = satirlar[i+2].strip().replace(",", ".")
                 if pddd_kontrol != "0.0" and pddd_kontrol != "A.D.":
@@ -72,6 +69,74 @@ except Exception as e:
     print(f"⚠️ PDF anlık okunamadı, yedeğe geçiliyor: {e}")
     tarama_listesi = bist100_yedek
 
+# ==============================================================================
+# SİLİNEN KRİTİK VERİLER VE FONKSİYONLAR (Eklendi)
+# ==============================================================================
+finans_hisseleri = [
+    "AKBNK", "GARAN", "ISCTR", "YKBNK", "VAKBN", "HALKB", 
+    "TSKB", "ALBRK", "ISMEN", "ANSGR", "TURSG", "ANHYT",
+]
+
+sektor_haritasi = {
+    "AKBNK": "Bankacılık", "ALBRK": "Bankacılık", "GARAN": "Bankacılık",
+    "HALKB": "Bankacılık", "ISCTR": "Bankacılık", "TSKB": "Bankacılık",
+    "VAKBN": "Bankacılık", "YKBNK": "Bankacılık", "ISMEN": "Aracı Kurum / Menkul Değer",
+    "ANHYT": "Sigorta / Emeklilik", "ANSGR": "Sigorta", "TURSG": "Sigorta",
+    "AGHOL": "Holding", "ALARK": "Holding", "BERA": "Holding",
+    "DOHOL": "Holding", "ECZYT": "Holding / Yatırım", "GLYHO": "Holding",
+    "KCHOL": "Holding", "PAHOL": "Holding", "SAHOL": "Holding",
+    "THYAO": "Ulaştırma / Havacılık", "PGSUS": "Ulaştırma / Havacılık",
+    "TAVHL": "Havalimanı Hizmetleri", "GRSEL": "Taşımacılık / Ulaştırma",
+    "RYSAS": "Lojistik / Depolama", "AHGAZ": "Gaz Dağıtım / Enerji",
+    "AKFYE": "Yenilenebilir Enerji", "AKSEN": "Elektrik / Enerji",
+    "ASTOR": "Elektrik Ekipmanları", "AYGAZ": "LPG / Gaz Dağıtım",
+    "CANTE": "Elektrik Üretimi", "CWENE": "Yenilenebilir Enerji / Güneş",
+    "ENERY": "Gaz Dağıtım / Enerji", "ENJSA": "Elektrik Dağıtım / Enerji",
+    "ENTRA": "Yenilenebilir Enerji", "GWIND": "Yenilenebilir Enerji",
+    "ODAS": "Elektrik Üretimi / Madencilik", "TUPRS": "Petrol Rafineri",
+    "ZOREN": "Elektrik / Enerji", "AEFES": "İçecek / Meşrubat",
+    "BIMAS": "Perakende Ticaret", "CCOLA": "İçecek / Meşrubat",
+    "MGROS": "Perakende Ticaret", "OBAMS": "Gıda Üretimi",
+    "SOKM": "Perakende Ticaret", "TABGD": "Restoran / Gıda",
+    "TUKAS": "Gıda İmalatı", "ULKER": "Gıda / Atıştırmalık",
+    "DOAS": "Otomotiv Dağıtım", "FROTO": "Otomotiv Üretim",
+    "KARSN": "Otomotiv Üretim", "KATMR": "Araç Üstü Ekipman / Savunma",
+    "OTKAR": "Otomotiv / Savunma", "TOASO": "Otomotiv Üretim",
+    "TTRAK": "Traktör / İş Makineleri", "BRSAN": "Boru / Çelik",
+    "BRYAT": "Borusan Yatırım / Sanayi", "EREGL": "Demir Çelik",
+    "ISDMR": "Demir Çelik", "KCAER": "Çelik Profil",
+    "KRDMD": "Demir Çelik", "AKCNS": "Çimento",
+    "BTCIM": "Çimento", "CIMSA": "Çimento",
+    "LMKDC": "Çimento", "OYAKC": "Çimento",
+    "EUREN": "Cam / Yapı Malzemeleri", "SISE": "Cam Sanayi",
+    "AKSA": "Kimya / Elyaf", "GUBRF": "Kimyevi Gübre",
+    "HEKTS": "Tarım Kimyasalları", "KORDS": "Endüstriyel İplik / Kord Bezi",
+    "PETKM": "Petrokimya", "SASA": "Polyester / Kimya",
+    "ASELS": "Savunma Sanayi", "ALTNY": "Teknoloji / Savunma",
+    "BINHO": "Teknoloji / Yatırım", "TCELL": "Telekomünikasyon",
+    "TTKOM": "Telekomünikasyon", "EKGYO": "Gayrimenkul Yatırım Ort.",
+    "RGYAS": "Gayrimenkul Yatırım Ort.", "SNGYO": "Gayrimenkul Yatırım Ort.",
+    "TRGYO": "Gayrimenkul Yatırım Ort.", "CVKMD": "Madencilik",
+    "EGEEN": "Otomotiv Yan Sanayi", "EGGUB": "Gübre / Limancılık",
+    "TRALT": "Madencilik / Altın", "TRMET": "Metal / Maden",
+    "ECILC": "İlaç / Sağlık", "MPARK": "Sağlık Hizmetleri",
+    "MAVI": "Tekstil / Hazır Giyim", "ARCLK": "Dayanıklı Tüketim",
+    "VESTL": "Dayanıklı Tüketim / Elektronik", "ENKAI": "İnşaat / Taahhüt / Enerji",
+    "FENER": "Spor Kulübü", "GLRMK": "İnşaat / Ağır Sanayi",
+    "TCKRC": "Dayanıklı Tüketim", "TKFEN": "İnşaat / Taahhüt / Tarım",
+    "TRENJ": "Enerji / Sanayi",
+}
+
+def getir_deger(df, kalem, idx=0):
+    if df is not None and not df.empty and kalem in df.index:
+        try:
+            val = df.loc[kalem].iloc[idx]
+            return float(val) if pd.notna(val) else 0.0
+        except Exception:
+            return 0.0
+    return 0.0
+
+# ==============================================================================
 
 master_veritabani = []
 print("🚀 Çeyreklik Bilanço Motoru Başlatıldı...")
@@ -161,7 +226,6 @@ for sira, hisse in enumerate(tarama_listesi, 1):
         ozkaynak_t = getir_deger(bs, "Stockholders Equity", idx_t)
         gecmis_kar_t = getir_deger(bs, "Retained Earnings", idx_t)
 
-        # Videodaki Fon Aktarımı / Diğer Alacak Oranı
         diger_alacak_t = getir_deger(bs, "Other Receivables", idx_t)
         alacak_orani = (diger_alacak_t / donen_t) if donen_t > 0 else 0.0
 
@@ -249,29 +313,9 @@ for sira, hisse in enumerate(tarama_listesi, 1):
 
         p_pio = round((piotroski / 9.0) * 20.0)
         p_alt = 15 if z_val >= 2.99 else (8 if z_val >= 1.81 else 0)
-        p_roe_s = (
-            20
-            if roe_hesap >= 0.30
-            else (
-                12
-                if roe_hesap >= 0.15
-                else (5 if roe_hesap >= 0.0 else 0)
-            )
-        )
-        p_roa_s = (
-            15
-            if roa_hesap >= 0.10
-            else (
-                10
-                if roa_hesap >= 0.05
-                else (4 if roa_hesap >= 0.0 else 0)
-            )
-        )
-        p_marj = (
-            10
-            if net_kar_marji >= 0.15
-            else (6 if net_kar_marji >= 0.07 else (2 if net_kar_marji > 0 else 0))
-        )
+        p_roe_s = 20 if roe_hesap >= 0.30 else (12 if roe_hesap >= 0.15 else (5 if roe_hesap >= 0.0 else 0))
+        p_roa_s = 15 if roa_hesap >= 0.10 else (10 if roa_hesap >= 0.05 else (4 if roa_hesap >= 0.0 else 0))
+        p_marj = 10 if net_kar_marji >= 0.15 else (6 if net_kar_marji >= 0.07 else (2 if net_kar_marji > 0 else 0))
         p_kald = 10 if kaldirac <= 0.50 else (5 if kaldirac <= 0.70 else 0)
         p_devir = 10 if aktif_devir >= 1.0 else (6 if aktif_devir >= 0.6 else 2)
 
@@ -310,9 +354,6 @@ for sira, hisse in enumerate(tarama_listesi, 1):
     time.sleep(0.15)
 
 df_m = pd.DataFrame(master_veritabani)
-df_m.to_csv("master_bilanco_bist_tum.csv", index=False, encoding="utf-8-sig")
-
-# Şablon Düzeni (Ana-Uydu Mimarisi İçin Sütunlar)
 sablon = pd.DataFrame()
 sablon["Hisse"] = df_m["Hisse"]
 sablon["Piotroski Skoru"] = df_m["Piotroski_Skor"]
@@ -327,11 +368,7 @@ sablon["Sektör"] = df_m["Hisse"].map(sektor_haritasi).fillna("Sanayi")
 sablon["Temel Skor"] = df_m["Temel_Skor"]
 sablon["İlişkili Taraf Durumu"] = df_m["Iliskili_Taraf"]
 
-# ==============================================================================
-# 3. MAKE.COM WEBHOOK KÖPRÜSÜ (CANLI EXCEL GÜNCELLEME)
-# ==============================================================================
 print("📡 Canlı Excel için Make.com Webhook'una veri gönderiliyor...")
-
 blok_ham_veri = sablon[[
     "Hisse", "Piotroski Skoru", "Altman Z", "ROA", "Brüt Marj", "ROE", 
     "Net Kar Marjı", "Aktif Devir Hızı", "Kaldıraç Oranı", "Sektör", 
