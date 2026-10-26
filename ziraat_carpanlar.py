@@ -179,16 +179,16 @@ for h in hisse_verileri:
 print(f"✅ Filtreden Geçen ve Temizlenen Hisse Sayısı: {len(guncellenecek_paketler)}")
 
 # --- 7. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
-# Hisseleri alfabetik sıraya diziyoruz
 guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
 
 matris_verisi = []
 for h in guncellenecek_paketler:
-    matris_verisi.append([h["FK"], h["PDDD"], h["Durum"]])
+    # 1. sütuna Hisse kodu eklendi, toplam 4 sütun oldu
+    matris_verisi.append([h["Hisse"], h["FK"], h["PDDD"], h["Durum"]])
 
-# Dinamik bitiş satırı: Başlangıç 2 olduğu için eleman sayısı + 1
+# Dinamik aralık artık A'dan D'ye (4 Sütun) 
 bitis_satiri = len(matris_verisi) + 1
-dinamik_aralik = f"L2:N{bitis_satiri}"
+dinamik_aralik = f"A2:D{bitis_satiri}"
 
 payload = {
     "islem_turu": "Haftalik_Carpan_Guncelleme",
