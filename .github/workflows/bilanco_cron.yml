@@ -27,7 +27,7 @@ jobs:
       - name: Gerekli Kütüphaneleri Yükle
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy yfinance openpyxl
+          pip install -r requirements.txt
 
       - name: Bilanço Motorunu Çalıştır
         run: |
@@ -37,6 +37,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add master_bilanco_bist100.csv Temel_Analiz_Omurga.xlsx
+          git add master_bilanco_bist_tum.csv Temel_Analiz_Omurga.xlsx
           # Sadece dosyada gerçek bir değişiklik varsa commit et
           git diff --quiet && git diff --staged --quiet || (git commit -m "auto: Çeyreklik bilanço verileri güncellendi [$(date +'%d.%m.%Y')]" && git push)
