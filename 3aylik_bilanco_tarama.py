@@ -2,6 +2,8 @@
 # KOD: BIST QUANT ENGINE - ÇEYREKLİK BİLANÇO & OTOMATİK EXCEL KÖPRÜSÜ
 # ==============================================================================
 import os
+import fitz
+import re
 import json
 import time
 from datetime import datetime
@@ -14,7 +16,7 @@ import yfinance as yf
 MAKE_BILANCO_WEBHOOK = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf7c"
 
 # ==============================================================================
-# 2. HİSSE LİSTESİNİ OKUMA (Ziraat Bülteni Havuzundan veya Yedek BİST 100'den)
+# 2. HİSSE LİSTESİNİ ZİRAAT PDF'İNDEN ANLIK ÇEKME
 # ==============================================================================
 bist100_yedek = [
     "AEFES", "AGHOL", "AHGAZ", "AKBNK", "AKCNS", "AKFYE", "AKSA", "AKSEN", "ALARK", "ALBRK",
@@ -29,78 +31,46 @@ bist100_yedek = [
     "TTKOM", "TTRAK", "TUKAS", "TUPRS", "TURSG", "ULKER", "VAKBN", "VESTL", "YKBNK", "ZOREN"
 ]
 
-if os.path.exists("bist_hisseleri.json"):
-    with open("bist_hisseleri.json", "r", encoding="utf-8") as f:
-        tarama_listesi = json.load(f)
-    print(f"✅ Ziraat bülteninden güncel {len(tarama_listesi)} hisse yüklendi.")
-else:
+print("🔍 Ziraat Bülteni PDF'i Bilanço Motoru için anlık taranıyor...")
+try:
+    # PDF'i indir
+    url = "https://www.ziraatyatirim.com.tr/arastirma-raporlari/haftalik-hisse-senedi-carpanlari"
+    res = requests.get(url, verify=False)
+    pdf_link_match = re.search(r'href="(/Files/.*?\.pdf)"', res.text)
+    pdf_url = "https://www.ziraatyatirim.com.tr" + pdf_link_match.group(1)
+    
+    pdf_res = requests.get(pdf_url, verify=False)
+    with open("temp_bilanco_ziraat.pdf", "wb") as f:
+        f.write(pdf_res.content)
+        
+    # PDF'den hisse kodlarını çıkar
+    doc = fitz.open("temp_bilanco_ziraat.pdf")
+    all_text = ""
+    for page in doc:
+        all_text += page.get_text("text") + "\n"
+        
+    tarama_listesi = []
+    satirlar = all_text.split("\n")
+    for i in range(len(satirlar) - 2):
+        row = satirlar[i].strip()
+        if re.match(r'^[A-Z]{4,5}$', row) and len(row) <= 5:
+            # Yanında değer olup olmadığını kontrol et (sığ tahtaları elemek için)
+            try:
+                pddd_kontrol = satirlar[i+2].strip().replace(",", ".")
+                if pddd_kontrol != "0.0" and pddd_kontrol != "A.D.":
+                    if row not in tarama_listesi:
+                        tarama_listesi.append(row)
+            except:
+                continue
+                
+    if len(tarama_listesi) > 100:
+        print(f"✅ Ziraat PDF'inden güncel {len(tarama_listesi)} hisse başarıyla çıkarıldı.")
+    else:
+        raise ValueError("PDF'den yeterli hisse okunamadı.")
+        
+except Exception as e:
+    print(f"⚠️ PDF anlık okunamadı, yedeğe geçiliyor: {e}")
     tarama_listesi = bist100_yedek
-    print(f"ℹ️ Yedek BİST 100 listesinden {len(tarama_listesi)} hisse yüklendi.")
-
-
-finans_hisseleri = [
-    "AKBNK", "GARAN", "ISCTR", "YKBNK", "VAKBN", "HALKB", 
-    "TSKB", "ALBRK", "ISMEN", "ANSGR", "TURSG", "ANHYT",
-]
-
-sektor_haritasi = {
-    "AKBNK": "Bankacılık", "ALBRK": "Bankacılık", "GARAN": "Bankacılık",
-    "HALKB": "Bankacılık", "ISCTR": "Bankacılık", "TSKB": "Bankacılık",
-    "VAKBN": "Bankacılık", "YKBNK": "Bankacılık", "ISMEN": "Aracı Kurum / Menkul Değer",
-    "ANHYT": "Sigorta / Emeklilik", "ANSGR": "Sigorta", "TURSG": "Sigorta",
-    "AGHOL": "Holding", "ALARK": "Holding", "BERA": "Holding",
-    "DOHOL": "Holding", "ECZYT": "Holding / Yatırım", "GLYHO": "Holding",
-    "KCHOL": "Holding", "PAHOL": "Holding", "SAHOL": "Holding",
-    "THYAO": "Ulaştırma / Havacılık", "PGSUS": "Ulaştırma / Havacılık",
-    "TAVHL": "Havalimanı Hizmetleri", "GRSEL": "Taşımacılık / Ulaştırma",
-    "RYSAS": "Lojistik / Depolama", "AHGAZ": "Gaz Dağıtım / Enerji",
-    "AKFYE": "Yenilenebilir Enerji", "AKSEN": "Elektrik / Enerji",
-    "ASTOR": "Elektrik Ekipmanları", "AYGAZ": "LPG / Gaz Dağıtım",
-    "CANTE": "Elektrik Üretimi", "CWENE": "Yenilenebilir Enerji / Güneş",
-    "ENERY": "Gaz Dağıtım / Enerji", "ENJSA": "Elektrik Dağıtım / Enerji",
-    "ENTRA": "Yenilenebilir Enerji", "GWIND": "Yenilenebilir Enerji",
-    "ODAS": "Elektrik Üretimi / Madencilik", "TUPRS": "Petrol Rafineri",
-    "ZOREN": "Elektrik / Enerji", "AEFES": "İçecek / Meşrubat",
-    "BIMAS": "Perakende Ticaret", "CCOLA": "İçecek / Meşrubat",
-    "MGROS": "Perakende Ticaret", "OBAMS": "Gıda Üretimi",
-    "SOKM": "Perakende Ticaret", "TABGD": "Restoran / Gıda",
-    "TUKAS": "Gıda İmalatı", "ULKER": "Gıda / Atıştırmalık",
-    "DOAS": "Otomotiv Dağıtım", "FROTO": "Otomotiv Üretim",
-    "KARSN": "Otomotiv Üretim", "KATMR": "Araç Üstü Ekipman / Savunma",
-    "OTKAR": "Otomotiv / Savunma", "TOASO": "Otomotiv Üretim",
-    "TTRAK": "Traktör / İş Makineleri", "BRSAN": "Boru / Çelik",
-    "BRYAT": "Borusan Yatırım / Sanayi", "EREGL": "Demir Çelik",
-    "ISDMR": "Demir Çelik", "KCAER": "Çelik Profil",
-    "KRDMD": "Demir Çelik", "AKCNS": "Çimento",
-    "BTCIM": "Çimento", "CIMSA": "Çimento",
-    "LMKDC": "Çimento", "OYAKC": "Çimento",
-    "EUREN": "Cam / Yapı Malzemeleri", "SISE": "Cam Sanayi",
-    "AKSA": "Kimya / Elyaf", "GUBRF": "Kimyevi Gübre",
-    "HEKTS": "Tarım Kimyasalları", "KORDS": "Endüstriyel İplik / Kord Bezi",
-    "PETKM": "Petrokimya", "SASA": "Polyester / Kimya",
-    "ASELS": "Savunma Sanayi", "ALTNY": "Teknoloji / Savunma",
-    "BINHO": "Teknoloji / Yatırım", "TCELL": "Telekomünikasyon",
-    "TTKOM": "Telekomünikasyon", "EKGYO": "Gayrimenkul Yatırım Ort.",
-    "RGYAS": "Gayrimenkul Yatırım Ort.", "SNGYO": "Gayrimenkul Yatırım Ort.",
-    "TRGYO": "Gayrimenkul Yatırım Ort.", "CVKMD": "Madencilik",
-    "EGEEN": "Otomotiv Yan Sanayi", "EGGUB": "Gübre / Limancılık",
-    "TRALT": "Madencilik / Altın", "TRMET": "Metal / Maden",
-    "ECILC": "İlaç / Sağlık", "MPARK": "Sağlık Hizmetleri",
-    "MAVI": "Tekstil / Hazır Giyim", "ARCLK": "Dayanıklı Tüketim",
-    "VESTL": "Dayanıklı Tüketim / Elektronik", "ENKAI": "İnşaat / Taahhüt / Enerji",
-    "FENER": "Spor Kulübü", "GLRMK": "İnşaat / Ağır Sanayi",
-    "TCKRC": "Dayanıklı Tüketim", "TKFEN": "İnşaat / Taahhüt / Tarım",
-    "TRENJ": "Enerji / Sanayi",
-}
-
-def getir_deger(df, kalem, idx=0):
-    if df is not None and not df.empty and kalem in df.index:
-        try:
-            val = df.loc[kalem].iloc[idx]
-            return float(val) if pd.notna(val) else 0.0
-        except Exception:
-            return 0.0
-    return 0.0
 
 
 master_veritabani = []
