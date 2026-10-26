@@ -15,15 +15,22 @@ MAKE_BILANCO_WEBHOOK = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf
 # 2. BİST TÜM Hisselerini Dinamik Olarak Çekme (İş Yatırım API)
 print("🔍 BİST TÜM hisse listesi canlı olarak çekiliyor...")
 url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseOzet"
+
+# İş Yatırım'ın güvenlik duvarına (WAF) takılmamak için gerçek tarayıcı kimliği ekliyoruz
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
+}
+
 try:
-    res = requests.get(url).json()
-    # İş Yatırım'dan tüm aktif hisse kodlarını alıyoruz
+    # İstek süresini uzatıyoruz ve headers ile istek atıyoruz
+    res = requests.get(url, headers=headers, timeout=15).json()
     bist_tum_hisseleri = [veri['hisseKod'] for veri in res['value']]
     print(f"✅ Toplam {len(bist_tum_hisseleri)} hisse başarıyla çekildi.")
 except Exception as e:
     print(f"⚠️ Hisse listesi çekilemedi: {e}")
-    # Hata durumunda yedeğe düşme
-    bist_tum_hisseleri = ["AKBNK", "THYAO", "TUPRS"] 
+    bist_tum_hisseleri = ["AKBNK", "THYAO", "TUPRS"] # Hata durumunda yedeğe düşme
 
 finans_hisseleri = [
     "AKBNK", "GARAN", "ISCTR", "YKBNK", "VAKBN", "HALKB", 
