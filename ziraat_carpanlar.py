@@ -178,6 +178,10 @@ for h in hisse_verileri:
 
 print(f"✅ Filtreden Geçen ve Temizlenen Hisse Sayısı: {len(guncellenecek_paketler)}")
 
+# Bilanço kodunun okuması için hisse listesini repo içine kaydet
+with open("bist_hisseleri.json", "w", encoding="utf-8") as f:
+    json.dump([h["Hisse"] for h in guncellenecek_paketler], f)
+
 # --- 7. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
 guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
 
