@@ -37,7 +37,7 @@ if not hedef_hisseler:
 # ==============================================================================
 # 3. YF VERİ TOPLAMA VE OPENAI YAPAY ZEKA SORGUSU
 # ==============================================================================
-for hisse in hedef_hisseler[:3]:  
+for hisse in hedef_hisseler:  
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
     
     try:
