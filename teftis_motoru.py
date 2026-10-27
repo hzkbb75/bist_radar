@@ -1,21 +1,21 @@
 import os
 import yfinance as yf
 import pandas as pd
-import google.generativeai as genai
+# YENİ KÜTÜPHANE: Artık 'google.genai' kullanıyoruz
+from google import genai
 from datetime import datetime
 
 # ==============================================================================
 # 1. API VE AYARLAR
 # ==============================================================================
-# GitHub Secrets'tan Gemini API anahtarını alıyoruz
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     print("❌ HATA: GEMINI_API_KEY bulunamadı! Lütfen GitHub Secrets'a ekleyin.")
     exit(1)
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-pro') # Ücretsiz ve hızlı model
+# YENİ İSTEMCİ BAŞLATMA
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 MIN_TEMEL_PUAN = 60  # Teftişe girecek hisseler için minimum Temel Puan sınırı
 
@@ -27,7 +27,7 @@ try:
     df = pd.read_csv("master_bilanco_bist_tum.csv")
     df['Temel_Skor'] = pd.to_numeric(df['Temel_Skor'], errors='coerce').fillna(0)
     
-    # 60 puan üstü ve İlişkili Tarafı temiz olanları seç (Patron riski olmayanlar)
+    # 60 puan üstü ve İlişkili Tarafı temiz olanları seç
     hedef_hisseler = df[(df['Temel_Skor'] >= MIN_TEMEL_PUAN) & (df['Iliskili_Taraf'] == "✅ Temiz")]["Hisse"].tolist()
     
     print(f"🎯 Güçlü Radar'a takılan {len(hedef_hisseler)} hisse bulundu: {hedef_hisseler}")
@@ -42,14 +42,13 @@ if not hedef_hisseler:
 # ==============================================================================
 # 3. YF VERİ TOPLAMA VE GEMINI YAPAY ZEKA SORGUSU
 # ==============================================================================
-for hisse in hedef_hisseler[:3]:  # API limitine takılmamak için her çalışmada maksimum en iyi 3 hisseyi teftiş et
+for hisse in hedef_hisseler[:3]:  # İlk 3 hisseyi teftiş et
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
     
     try:
         ticker = yf.Ticker(f"{hisse}.IS")
         info = ticker.info
         
-        # LLM'e göndermek için şirketin güncel finansal özetini hazırlıyoruz
         sirket_ozeti = f"""
         Şirket: {hisse} ({info.get('longName', 'Bilinmiyor')})
         Sektör: {info.get('sector', 'Bilinmiyor')}
@@ -91,11 +90,13 @@ for hisse in hedef_hisseler[:3]:  # API limitine takılmamak için her çalışm
         (Şirketi 'Korunaklı/Kırılgan/Hendeksiz' olarak kategorize et ve portföye en fazla % kaç ağırlıkla alınabileceğini tavsiye et.)
         """
         
-        # Gemini'dan yanıtı al
-        response = model.generate_content(prompt)
+        # YENİ SÖZDİZİMİ (SYNTAX): genai.Client üzerinden çağrı
+        response = client.models.generate_content(
+            model='gemini-2.5-flash', # En güncel ve kararlı model
+            contents=prompt,
+        )
         rapor_metni = response.text
         
-        # Markdown dosyası olarak kaydet
         dosya_adi = f"TEFTIS_{hisse}.md"
         with open(dosya_adi, "w", encoding="utf-8") as f:
             f.write(rapor_metni)
