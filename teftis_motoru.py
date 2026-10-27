@@ -101,6 +101,12 @@ for hisse in hedef_hisseler:
         
         Kullanacağın Veriler:
         {sirket_ozeti}
+
+        🚨 BÖLÜM 5 İÇİN KULLANMAN GEREKEN KESİN KİTAP KURALLARI (SAYFA 215-217):
+        - Portföy Sınırları: Tek bir sektöre maksimum %20; en kusursuz "Korunaklı" şirkete bile maksimum %10 sermaye ayrılır (Alt sınır %1'dir).
+        - Hendeksiz Şirket Şartı: Şirket "Hendeksiz (Emtia/Döngüsel)" ise, Piotroski Skoru en az 7 olmalı ve %45-50 güvenlik marjı sunmadan asla portföye alınmamalıdır.
+        - Aşamalandırma (Kademeli Alım): Onaylanan hisseye tek seferde girilmez. %1-2'lik öncü pozisyon açılır, fiyat ucuzladıkça ağırlık artırılır.
+        - Kesin Çıkış Kuralları (Satış): Hâkim ortak pay satışı yaparsa, yönetim kalitesi/dürüstlüğü bozulursa, rekabet avantajı (hendek) yok olursa veya Fiyat/Kazanç (F/K) aşırı şişip kazanç getirisi risksiz faizin altına inerse pozisyon acilen kapatılır.
         
         Aşağıdaki şablonu birebir Markdown formatında kullan:
 
