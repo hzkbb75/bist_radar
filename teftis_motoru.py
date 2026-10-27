@@ -15,7 +15,7 @@ if not GEMINI_API_KEY:
     exit(1)
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash') # Ücretsiz ve hızlı model
+model = genai.GenerativeModel('gemini-pro') # Ücretsiz ve hızlı model
 
 MIN_TEMEL_PUAN = 60  # Teftişe girecek hisseler için minimum Temel Puan sınırı
 
