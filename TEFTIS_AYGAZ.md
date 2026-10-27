@@ -1,0 +1,16 @@
+### 📄 YATIRIM TEFTİŞ KARNESİ: AYGAZ
+
+**Bölüm 1 — Elemeler (Kırmızı Çizgiler)**  
+Aygaz A.Ş. hisse senedinin temel verileri incelendiğinde dikkat çeken bazı unsurlar mevcut. F/K oranı 7.14 ile sektör ortalamasının altında bulunmaktadır. Ancak, PD/DD oranının 0.71 olması, şirketin piyasa değerinin altındaki bir değerlemenin olduğunu düşündürmektedir. Özkaynak kârlılığı %6.1 ile düşük bir seviyede, bu da şirketin kârlılık açısından zayıf bir performans sergilediğini gösteriyor. Borç/özkaynak oranı 3.77, yüksek bir finansal risk işareti olabileceğinden, dikkatli olmak gerekmektedir. Bu nedenle, bu red bayrakları göz önünde bulundurulmalı.
+
+**Bölüm 2 — İş Kalitesi (Hendek Testi)**  
+Şirketin kâr marjı %4.23 olarak belirlenmiştir. Bu marj, enerji sektöründeki diğer oyunculara göre düşük görünmekte olup, maliyet kontrolü ve yönetim verimliliği açısından sorgulanabilir. Özkaynak kârlılığı (ROE) %6.1 ile sektördeki diğer oyuncularla kıyaslandığında zayıf bir durum sergilemektedir. Genel piyasa koşulları ve rekabetçi baskılar göz önüne alındığında, Aygaz’ın iş kalitesi normalden düşük bir seviyede değerlendirilmelidir. Yüksek borçluluk ile birleştirildiğinde, şirketin finansal sağlığı şüphe yaratmaktadır.
+
+**Bölüm 3 — Tablolar (Kârın Gerçekliği)**  
+Aygaz’ın kâr marjı ve özkaynak kârlılığı, şirketin kâr potansiyelinin sorgulanmasına neden olmaktadır. Diğer yandan, yüksek borçluluk oranı, şirketin kârını artıracak yeni yatırıma yönelmesine engel olabilir. Sonuç olarak, Aygaz’ın mali verileri, sürdürülebilir bir büyüme göstermekte zorlanıyor olabilir. Şirketin diğer temel finansal göstergeleri de benzer bir şekilde zayıf bir sinyal vermekte. Yatırımcıların, şirketin kâr gerçekleştirme kabiliyetini göz önünde bulundurması elzemdir.
+
+**Bölüm 4 — Fiyat, Teknik Görünüm ve Güvenlik Marjı**  
+AYGAZ, 52 haftalık zirvesinin %21.57 altında işlem görmekte olup, zirve fiyatı 346.5 TL, mevcut fiyatı ise 271.75 TL olarak belirlenmiştir. Teknik görünüm yatay ya da karışık bir seyir izlemekte ve bu da kısa vadeli trendlerin belirsiz olduğunu işaret etmektedir. Bu durumda, hisse fiyatı düşerken alım için güvenli bir bölgeye henüz ulaşmamış olabilir. Ancak, mevcut fiyat seviyeleri potansiyel olarak alım fırsatları sunabilir. Yine de, yatırımcıların dikkatli olması ve piyasa koşullarını izlemeleri önemlidir.
+
+**Bölüm 5 — Nihai Karar & Portföy Rejimi**  
+Aygaz A.Ş. hissesinin mevcut temel ve teknik verileri, yatırımcılar için riskli bir seçenek oluşturmakta. Birçok kırmızı çizgi ve zayıf performans göstergesi, Aygaz’ı kısa vadede fazla cazip kılmamaktadır. Temel veriler yatırımcıların dikkat etmesi gereken unsurlar arz etmekte; yüksek finansal risk anlamına gelen borçluluk durumu, kâr marjı ve özkaynak kârlılığı gibi unsurlar olumsuz bir izlenim bırakmaktadır. Nihai karar, yatırımcıların risk toleranslarına bağlı olarak bir gözlem yapmaları yönünde olmalıdır; mevcut durum itibarıyla Aygaz, kısa vadeli bir yatırım için önerilmemektedir. Portföyde temkinli bir şekilde izlenmesi veya satış yönlü pozisyon düşünülmesi daha sağlıklı bir yaklaşım olacaktır.
