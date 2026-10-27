@@ -1,7 +1,8 @@
 import os
 import yfinance as yf
 import pandas as pd
-from google import genai
+# ESKİ VE SAĞLAM KÜTÜPHANEYE GERİ DÖNÜYORUZ
+import google.generativeai as genai
 from datetime import datetime
 
 # ==============================================================================
@@ -13,9 +14,12 @@ if not GEMINI_API_KEY:
     print("❌ HATA: GEMINI_API_KEY bulunamadı! Lütfen GitHub Secrets'a ekleyin.")
     exit(1)
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
 
-MIN_TEMEL_PUAN = 60
+# HİÇ DEĞİŞMEYEN KLASİK MODEL (gemini-pro)
+model = genai.GenerativeModel('gemini-pro')
+
+MIN_TEMEL_PUAN = 60  
 
 # ==============================================================================
 # 2. HİSSE FİLTRELEME (GÜÇLÜ RADAR)
@@ -39,7 +43,7 @@ if not hedef_hisseler:
 # ==============================================================================
 # 3. YF VERİ TOPLAMA VE GEMINI YAPAY ZEKA SORGUSU
 # ==============================================================================
-for hisse in hedef_hisseler[:3]:
+for hisse in hedef_hisseler[:3]:  
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
     
     try:
@@ -87,12 +91,8 @@ for hisse in hedef_hisseler[:3]:
         (Şirketi 'Korunaklı/Kırılgan/Hendeksiz' olarak kategorize et ve portföye en fazla % kaç ağırlıkla alınabileceğini tavsiye et.)
         """
         
-        # EN GARANTİLİ VE STABİL MODEL ADLANDIRMASI
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', # v1beta için en güncel flash modeli
-            contents=prompt,
-            config={'http_options': {'api_version': 'v1alpha'}} # Eğer v1beta'da hala bulamazsa diye alpha versiyonunu da denemesi için
-        )
+        # ESKİ KÜTÜPHANEYLE (generate_content) ÇAĞRI YAPIYORUZ
+        response = model.generate_content(prompt)
         rapor_metni = response.text
         
         dosya_adi = f"TEFTIS_{hisse}.md"
