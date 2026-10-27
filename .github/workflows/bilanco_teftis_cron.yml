@@ -22,14 +22,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install requests pandas yfinance
+          pip install openai pandas yfinance
 
       - name: Bilanço Motorunu Çalıştır
         run: python 3aylik_bilanco_tarama.py
 
       - name: Yapay Zeka Teftiş Motorunu Çalıştır (GÜÇLÜ RADAR)
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python teftis_motoru.py
 
       - name: Güncellenen Dosyaları ve Teftiş Raporlarını Kaydet (Auto-Commit)
