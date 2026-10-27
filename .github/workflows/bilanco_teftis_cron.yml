@@ -22,7 +22,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-generativeai pandas yfinance
+          pip install google-genai pandas yfinance
 
       - name: Bilanço Motorunu Çalıştır
         run: python 3aylik_bilanco_tarama.py
