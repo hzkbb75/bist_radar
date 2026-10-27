@@ -87,10 +87,11 @@ for hisse in hedef_hisseler[:3]:
         (Şirketi 'Korunaklı/Kırılgan/Hendeksiz' olarak kategorize et ve portföye en fazla % kaç ağırlıkla alınabileceğini tavsiye et.)
         """
         
-        # HATA ÇÖZÜMÜ: Model adı 'gemini-3.0-flash' olarak güncellendi.
+        # EN GARANTİLİ VE STABİL MODEL ADLANDIRMASI
         response = client.models.generate_content(
-            model='gemini-3.0-flash', 
+            model='gemini-2.5-flash', # v1beta için en güncel flash modeli
             contents=prompt,
+            config={'http_options': {'api_version': 'v1alpha'}} # Eğer v1beta'da hala bulamazsa diye alpha versiyonunu da denemesi için
         )
         rapor_metni = response.text
         
