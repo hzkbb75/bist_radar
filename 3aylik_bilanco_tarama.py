@@ -2,8 +2,6 @@
 # KOD: BIST QUANT ENGINE - ÇEYREKLİK BİLANÇO & OTOMATİK EXCEL KÖPRÜSÜ
 # ==============================================================================
 import os
-import fitz
-import re
 import json
 import time
 from datetime import datetime
@@ -11,77 +9,72 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
-import urllib3
-
-# Güvenlik uyarılarını gizle
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 1. Canlı Make.com Webhook Adresi
 MAKE_BILANCO_WEBHOOK = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf7c"
 
 # ==============================================================================
-# 2. HİSSE LİSTESİNİ ZİRAAT PDF'İNDEN ANLIK ÇEKME (Bot Koruması Aşıldı)
+# 2. BİST TÜM HİSSE LİSTESİ (SABİT VE GARANTİLİ)
 # ==============================================================================
-bist100_yedek = [
-    "AEFES", "AGHOL", "AHGAZ", "AKBNK", "AKCNS", "AKFYE", "AKSA", "AKSEN", "ALARK", "ALBRK",
-    "ALTNY", "ANHYT", "ANSGR", "ARCLK", "ASELS", "ASTOR", "AYGAZ", "BERA", "BIMAS", "BINHO",
-    "BRSAN", "BRYAT", "BTCIM", "CANTE", "CCOLA", "CIMSA", "CVKMD", "CWENE", "DOAS", "DOHOL",
-    "ECILC", "ECZYT", "EGEEN", "EGGUB", "EKGYO", "ENERY", "ENJSA", "ENKAI", "ENTRA", "EREGL",
-    "EUREN", "FENER", "FROTO", "GARAN", "GLRMK", "GLYHO", "GRSEL", "GUBRF", "GWIND", "HALKB",
-    "HEKTS", "ISCTR", "ISDMR", "ISMEN", "KARSN", "KATMR", "KCAER", "KCHOL", "KORDS", "KRDMD",
-    "LMKDC", "MAVI", "MGROS", "MPARK", "OBAMS", "ODAS", "OTKAR", "OYAKC", "PAHOL", "PETKM",
-    "PGSUS", "RGYAS", "RYSAS", "SAHOL", "SASA", "SISE", "SNGYO", "SOKM", "TABGD", "TAVHL",
-    "TCELL", "TCKRC", "THYAO", "TKFEN", "TOASO", "TRALT", "TRENJ", "TRGYO", "TRMET", "TSKB",
-    "TTKOM", "TTRAK", "TUKAS", "TUPRS", "TURSG", "ULKER", "VAKBN", "VESTL", "YKBNK", "ZOREN"
+print("🔍 BİST TÜM hisseleri kod içerisinden yükleniyor...")
+
+tarama_listesi = [
+    "A1CAP", "ACSEL", "ADEL", "ADESE", "AEFES", "AFYON", "AGESA", "AGHOL", "AGROT", "AHGAZ",
+    "AKBNK", "AKCNS", "AKENR", "AKFGY", "AKFYE", "AKGRT", "AKMGY", "AKSA", "AKSEN", "AKSGY",
+    "ALARK", "ALBRK", "ALCAR", "ALCTL", "ALFAS", "ALKA", "ALKIM", "ALMAD", "ALTNY", "ALVES",
+    "AMATV", "ANGEN", "ANHYT", "ANSGR", "ARASE", "ARCLK", "ARDYZ", "ARENA", "ARSAN", "ARTMS",
+    "ARZUM", "ASELS", "ASGYO", "ASTOR", "ASUZU", "ATAGY", "ATAKP", "ATATP", "ATEKS", "ATLAS",
+    "ATSYH", "AVGYO", "AVHOL", "AVOD", "AVTUR", "AYCES", "AYDEM", "AYEN", "AYGAZ", "AZTEK",
+    "BAGFS", "BAKAB", "BALAT", "BANVT", "BARMA", "BASGZ", "BAYRK", "BEAYO", "BEYAZ", "BFREN",
+    "BIENY", "BIGCH", "BIMAS", "BINHO", "BIOEN", "BIZIM", "BJKAS", "BLCYT", "BMSCH", "BMSTL",
+    "BNTAS", "BOBET", "BOSSA", "BRISA", "BRKO", "BRKSN", "BRKVY", "BRLSM", "BRMEN", "BRSAN",
+    "BRYAT", "BSOKE", "BTCIM", "BUCIM", "BURCE", "BURVA", "BVSAN", "BYDNR", "CANTE", "CASA",
+    "CATES", "CCOLA", "CELHA", "CEMAS", "CEMTS", "CEOEM", "CIMSA", "CLEBI", "CMBTN", "CMENT",
+    "CONSE", "COSMO", "CRDFA", "CRFSA", "CUSAN", "CVKMD", "CWENE", "DAGHL", "DAGI", "DAPGM",
+    "DARDL", "DERHL", "DERIM", "DESA", "DESPC", "DEVA", "DGNMO", "DIRIT", "DITAS", "DMRGD",
+    "DMSAS", "DOAS", "DOBUR", "DOCO", "DOGUB", "DOHOL", "DOKTA", "DURDO", "DYOBY", "DZGYO",
+    "EBEBK", "ECILC", "ECZYT", "EDATA", "EDIP", "EGEEN", "EGEPO", "EGGUB", "EGPRO", "EGSER",
+    "EKGYO", "EKIZ", "EKOS", "EKSUN", "ELITE", "EMKEL", "ENERY", "ENJSA", "ENKAI", "ENTRA",
+    "EPLAS", "ERBOS", "ERCB", "EREGL", "ERSU", "ESCAR", "ESCOM", "ESEN", "ETILR", "ETYAT",
+    "EUHOL", "EUKYO", "EUREN", "EUYO", "EYGYO", "FADIL", "FASIL", "FATSA", "FENER", "FLAP",
+    "FONET", "FORMT", "FORTE", "FRIGO", "FROTO", "FZLGY", "GARAN", "GARFA", "GEDIK", "GEDZA",
+    "GENIL", "GENTS", "GEREL", "GESAN", "GIPTA", "GLBMD", "GLCVY", "GLRYH", "GLYHO", "GMTAS",
+    "GOKNR", "GOLTS", "GOODY", "GOZDE", "GRNYO", "GRSEL", "GRTRK", "GSDDE", "GSDHO", "GSRAY",
+    "GUBRF", "GWIND", "HALKB", "HATEK", "HATSN", "HDFGS", "HEDEF", "HEKTS", "HKTM", "HLGYO",
+    "HRZIO", "HSCSW", "HTTBT", "HUBVC", "HUNER", "HURGZ", "ICBCT", "ICUGS", "IDGYO", "IEYHO",
+    "IHAAS", "IHEVA", "IHGZT", "IHLAS", "IHLGM", "IHYAY", "IMASM", "INDES", "INFO", "INGRM",
+    "INTEM", "INVEO", "INVES", "IPEKE", "ISATR", "ISBTR", "ISCTR", "ISDMR", "ISFIN", "ISGSY",
+    "ISGYO", "ISKPL", "ISKUR", "ISMEN", "ISSEN", "ISYAT", "ITTFH", "IZENR", "IZFAS", "IZINV",
+    "IZMDC", "JANTS", "KAPLM", "KAREL", "KARSN", "KARTN", "KARYE", "KATMR", "KCAER", "KCHOL",
+    "KENT", "KERVN", "KERVT", "KFEIN", "KGYO", "KIMMR", "KLGYO", "KLKIM", "KLMSN", "KLNMA",
+    "KLRHO", "KMPUR", "KNFRT", "KOCMT", "KONKA", "KONTR", "KONYA", "KORDS", "KOZAA", "KOZAL",
+    "KRDMA", "KRDMB", "KRDMD", "KRGYO", "KRONT", "KRPLS", "KRSTL", "KRTEK", "KRVGD", "KSTUR",
+    "KTLEV", "KTSKR", "KUTPO", "KUVVA", "KUYAS", "KZBGY", "KZGYO", "LIDER", "LIDFA", "LINK",
+    "LKMNH", "LMKDC", "LOGO", "LRSHO", "LUKSK", "MAALT", "MACKO", "MACRO", "MAGEN", "MAKIM",
+    "MAKTK", "MANAS", "MARKA", "MARTI", "MAVI", "MEDTR", "MEGAP", "MEKAG", "MEPET", "MERCN",
+    "MERIT", "MERKO", "METRO", "METUR", "MGROS", "MHRGY", "MIATK", "MIPAZ", "MMCAS", "MNDRS",
+    "MNDTR", "MOBTL", "MOGAN", "MPARK", "MRGYO", "MRSHL", "MSGYO", "MTRKS", "MTRYO", "MUHAL",
+    "MUREN", "MZHLD", "NATEN", "NETAS", "NIBAS", "NTGAZ", "NTHOL", "NUGYO", "NUHCM", "OBAMS",
+    "OBASE", "ODAS", "ODINE", "OFSYM", "ONCSM", "ORCAY", "ORGE", "ORMA", "OSMEN", "OSTIM",
+    "OTKAR", "OYAKC", "OYAYO", "OYLUM", "OYYAT", "OZGYO", "OZKGY", "OZRDN", "OZSUB", "PAGYO",
+    "PAMEL", "PENGD", "PENTA", "PETKM", "PETUN", "PGSUS", "PINSU", "PKART", "PKENT", "PLTUR",
+    "PNLSN", "PNSUT", "POLHO", "POLTK", "PRDGS", "PRKAB", "PRKME", "PRZMA", "PSDTC", "PSGYO",
+    "QNBFB", "QNBFL", "QUAGR", "RALYH", "RAYSG", "REEDR", "RGYAS", "RNPOL", "RODRG", "ROYAL",
+    "RTALB", "RUBNS", "RYGYO", "RYSAS", "SAFKR", "SAHOL", "SAMAT", "SANEL", "SANFM", "SANKO",
+    "SARKY", "SASA", "SAYAS", "SDTTR", "SEGYO", "SEKFK", "SEKUR", "SELEC", "SELGD", "SELVA",
+    "SEYKM", "SILVR", "SISE", "SKBNK", "SKTAS", "SMART", "SMRTG", "SNGYO", "SNICA", "SNKRN",
+    "SNPAM", "SOKE", "SOKM", "SONME", "SRVGY", "SUMAS", "SUNTK", "SURGY", "SUWEN", "TABGD",
+    "TARKM", "TATEN", "TATGD", "TAVHL", "TBORG", "TCELL", "TCKRC", "TEKTU", "TERA", "TETMT",
+    "TEZOL", "TGSAS", "THYAO", "TKFEN", "TKNSA", "TLMAN", "TMPOL", "TMSN", "TOASO", "TRALT",
+    "TRCAS", "TRGYO", "TRILC", "TRMET", "TSGYO", "TSKB", "TSPOR", "TTKOM", "TTRAK", "TUCLK",
+    "TUKAS", "TUPRS", "TUREX", "TURGG", "TURSG", "UFUK", "ULAS", "ULKER", "ULUFA", "ULUSE",
+    "ULUUN", "UMPAS", "UNLU", "USAK", "UZERB", "VAKBN", "VAKFN", "VAKKO", "VANGD", "VBTYZ",
+    "VERTU", "VERUS", "VESBE", "VESTL", "VKFYO", "VKGYO", "VKING", "VRGYO", "YAPRK", "YATAS",
+    "YAYLA", "YBTAS", "YEOTK", "YESIL", "YGGYO", "YGYO", "YKBNK", "YKSLN", "YONGA", "YUNSA",
+    "YYAPI", "ZEDUR", "ZGOLD", "ZOREN", "ZRGYO"
 ]
 
-print("🔍 Ziraat Bülteni PDF'i Bilanço Motoru için anlık taranıyor...")
-try:
-    url = "https://www.ziraatyatirim.com.tr/arastirma-raporlari/haftalik-hisse-senedi-carpanlari"
-    
-    # Gerçek bir tarayıcı gibi davranması için kimlik ekliyoruz
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
-    res = requests.get(url, headers=headers, verify=False, timeout=15)
-    pdf_link_match = re.search(r'href="(/Files/.*?\.pdf)"', res.text)
-    
-    if not pdf_link_match:
-        raise ValueError("PDF linki bulunamadı. Ziraat bot koruması aktif olabilir.")
-        
-    pdf_url = "https://www.ziraatyatirim.com.tr" + pdf_link_match.group(1)
-    
-    pdf_res = requests.get(pdf_url, headers=headers, verify=False, timeout=15)
-    with open("temp_bilanco_ziraat.pdf", "wb") as f:
-        f.write(pdf_res.content)
-        
-    doc = fitz.open("temp_bilanco_ziraat.pdf")
-    all_text = ""
-    for page in doc:
-        all_text += page.get_text("text") + "\n"
-        
-    tarama_listesi = []
-    satirlar = all_text.split("\n")
-    for i in range(len(satirlar) - 2):
-        row = satirlar[i].strip()
-        if re.match(r'^[A-Z]{4,5}$', row) and len(row) <= 5:
-            try:
-                pddd_kontrol = satirlar[i+2].strip().replace(",", ".")
-                if pddd_kontrol != "0.0" and pddd_kontrol != "A.D.":
-                    if row not in tarama_listesi:
-                        tarama_listesi.append(row)
-            except:
-                continue
-                
-    if len(tarama_listesi) > 100:
-        print(f"✅ Ziraat PDF'inden güncel {len(tarama_listesi)} hisse başarıyla çıkarıldı.")
-    else:
-        raise ValueError("PDF'den yeterli hisse okunamadı.")
-        
-except Exception as e:
-    print(f"⚠️ PDF anlık okunamadı, yedeğe geçiliyor: {e}")
-    tarama_listesi = bist100_yedek
+print(f"✅ BİST TÜM listesinden {len(tarama_listesi)} hisse başarıyla yüklendi.")
 
 # ==============================================================================
 # 3. VERİ SÖZLÜKLERİ VE FONKSİYONLAR
