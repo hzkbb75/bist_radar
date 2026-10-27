@@ -35,13 +35,21 @@ if not hedef_hisseler:
     exit(0)
 
 # ==============================================================================
-# 3. YF VERİ TOPLAMA VE OPENAI YAPAY ZEKA SORGUSU (TEKNİK DESTEKLİ)
+# 3. YF VERİ TOPLAMA VE OPENAI YAPAY ZEKA SORGUSU (TEKNİK + KANTİTATİF DESTEKLİ)
 # ==============================================================================
-# KİLİT KALDIRILDI: Artık radardaki TÜM hisseler taranacak
 for hisse in hedef_hisseler:  
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
     
     try:
+        # --- 1. EXCEL (CSV) SATIRINDAKİ ÖZEL PUANLARIMIZI ÇEKELİM ---
+        hisse_verisi = df[df['Hisse'] == hisse].iloc[0]
+        
+        # Sütun isimlerindeki olası farklılıkları tolere etmek için get() kullanıyoruz.
+        temel_skor = hisse_verisi.get('Temel_Skor', 'Bilinmiyor')
+        altman_z = hisse_verisi.get('Altman_Z', hisse_verisi.get('Altman Z', 'Bilinmiyor'))
+        piotroski = hisse_verisi.get('Piotroski_Skoru', hisse_verisi.get('Piotroski Skoru', 'Bilinmiyor'))
+
+        # --- 2. YFINANCE VERİLERİ ---
         ticker = yf.Ticker(f"{hisse}.IS")
         info = ticker.info
         
@@ -58,66 +66,4 @@ for hisse in hedef_hisseler:
             
         trend_durumu = "Bilinmiyor"
         if current_price and ma_50 and ma_200:
-            if current_price > ma_50 and ma_50 > ma_200:
-                trend_durumu = "Güçlü Yükseliş Trendi (Fiyat > 50 HO > 200 HO)"
-            elif current_price < ma_50 and ma_50 < ma_200:
-                trend_durumu = "Düşüş Trendi (Fiyat < 50 HO < 200 HO)"
-            else:
-                trend_durumu = "Yatay veya Karışık Seyir"
-
-        sirket_ozeti = f"""
-        Şirket: {hisse} ({info.get('longName', 'Bilinmiyor')})
-        Sektör: {info.get('sector', 'Bilinmiyor')}
-        
-        --- TEMEL VERİLER ---
-        F/K Oranı: {info.get('trailingPE', 'Bilinmiyor')}
-        PD/DD Oranı: {info.get('priceToBook', 'Bilinmiyor')}
-        Kâr Marjı: {info.get('profitMargins', 'Bilinmiyor')}
-        Özkaynak Kârlılığı (ROE): {info.get('returnOnEquity', 'Bilinmiyor')}
-        Borç/Özkaynak Oranı: {info.get('debtToEquity', 'Bilinmiyor')}
-        
-        --- TEKNİK VERİLER ---
-        52 Haftalık Zirveye Uzaklık: {zirveye_uzaklik}
-        Teknik Trend Durumu: {trend_durumu}
-        """
-        
-        prompt = f"""
-        Sen, Serkan Ünal'ın 'Borsa İstanbul İçin Hisse Seçim Rehberi' kitabındaki değer yatırımı prensiplerini uygulayan uzman ve katı bir kantitatif finansal analistsin.
-        
-        Bana {hisse} kodlu hisse senedi için tam olarak aşağıdaki 5 başlıktan oluşan ve Markdown formatında şık bir 'Yatırım Teftiş Karnesi' yaz.
-        Şirketin güncel temel ve teknik finansal verileri şunlardır:
-        {sirket_ozeti}
-        
-        Eğer güncel verilerde bir eksiklik varsa, sektörel ve genel piyasa bilgini kullanarak destekle.
-        Dilin ciddi, şüpheli ve sadece yatırımcıyı korumaya odaklı olmalı.
-        Özellikle Bölüm 4'te (Fiyat ve Güvenlik Marjı) hissenin teknik olarak zirveden ne kadar düştüğünü ve trend durumunu değerlendirerek alım için güvenli bir bölgede olup olmadığını yorumla.
-        
-        Şablon Başlıkları (Birebir bu formatı ve Markdown'u kullan):
-        ### 📄 YATIRIM TEFTİŞ KARNESİ: {hisse}
-        
-        **Bölüm 1 — Elemeler (Kırmızı Çizgiler)**
-        **Bölüm 2 — İş Kalitesi (Hendek Testi)**
-        **Bölüm 3 — Tablolar (Kârın Gerçekliği)**
-        **Bölüm 4 — Fiyat, Teknik Görünüm ve Güvenlik Marjı**
-        **Bölüm 5 — Nihai Karar & Portföy Rejimi**
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Sen usta bir kantitatif ve teknik analistsin."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        rapor_metni = response.choices[0].message.content
-        
-        dosya_adi = f"TEFTIS_{hisse}.md"
-        with open(dosya_adi, "w", encoding="utf-8") as f:
-            f.write(rapor_metni)
-            
-        print(f"✅ {dosya_adi} başarıyla oluşturuldu ve kaydedildi!")
-        
-    except Exception as e:
-        print(f"⚠️ {hisse} teftişinde hata: {e}")
-
-print("\n🚀 Tüm yapay zeka teftiş işlemleri tamamlandı!")
+            if current_price > ma_50 and ma_50 > ma_200
