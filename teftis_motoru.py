@@ -1,7 +1,6 @@
 import os
 import yfinance as yf
 import pandas as pd
-# YENİ KÜTÜPHANE: Artık 'google.genai' kullanıyoruz
 from google import genai
 from datetime import datetime
 
@@ -14,10 +13,9 @@ if not GEMINI_API_KEY:
     print("❌ HATA: GEMINI_API_KEY bulunamadı! Lütfen GitHub Secrets'a ekleyin.")
     exit(1)
 
-# YENİ İSTEMCİ BAŞLATMA
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-MIN_TEMEL_PUAN = 60  # Teftişe girecek hisseler için minimum Temel Puan sınırı
+MIN_TEMEL_PUAN = 60
 
 # ==============================================================================
 # 2. HİSSE FİLTRELEME (GÜÇLÜ RADAR)
@@ -27,7 +25,6 @@ try:
     df = pd.read_csv("master_bilanco_bist_tum.csv")
     df['Temel_Skor'] = pd.to_numeric(df['Temel_Skor'], errors='coerce').fillna(0)
     
-    # 60 puan üstü ve İlişkili Tarafı temiz olanları seç
     hedef_hisseler = df[(df['Temel_Skor'] >= MIN_TEMEL_PUAN) & (df['Iliskili_Taraf'] == "✅ Temiz")]["Hisse"].tolist()
     
     print(f"🎯 Güçlü Radar'a takılan {len(hedef_hisseler)} hisse bulundu: {hedef_hisseler}")
@@ -42,7 +39,7 @@ if not hedef_hisseler:
 # ==============================================================================
 # 3. YF VERİ TOPLAMA VE GEMINI YAPAY ZEKA SORGUSU
 # ==============================================================================
-for hisse in hedef_hisseler[:3]:  # İlk 3 hisseyi teftiş et
+for hisse in hedef_hisseler[:3]:
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
     
     try:
@@ -90,9 +87,9 @@ for hisse in hedef_hisseler[:3]:  # İlk 3 hisseyi teftiş et
         (Şirketi 'Korunaklı/Kırılgan/Hendeksiz' olarak kategorize et ve portföye en fazla % kaç ağırlıkla alınabileceğini tavsiye et.)
         """
         
-        # YENİ SÖZDİZİMİ (SYNTAX): genai.Client üzerinden çağrı
+        # HATA ÇÖZÜMÜ: Model adı 'gemini-3.0-flash' olarak güncellendi.
         response = client.models.generate_content(
-            model='gemini-2.5-flash', # En güncel ve kararlı model
+            model='gemini-3.0-flash', 
             contents=prompt,
         )
         rapor_metni = response.text
