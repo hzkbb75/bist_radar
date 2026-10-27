@@ -1,8 +1,7 @@
 import os
 import yfinance as yf
 import pandas as pd
-# ESKİ VE SAĞLAM KÜTÜPHANEYE GERİ DÖNÜYORUZ
-import google.generativeai as genai
+import requests  # Kütüphane yerine doğrudan sunucuya bağlanacağız
 from datetime import datetime
 
 # ==============================================================================
@@ -13,11 +12,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     print("❌ HATA: GEMINI_API_KEY bulunamadı! Lütfen GitHub Secrets'a ekleyin.")
     exit(1)
-
-genai.configure(api_key=GEMINI_API_KEY)
-
-# HİÇ DEĞİŞMEYEN KLASİK MODEL (gemini-pro)
-model = genai.GenerativeModel('gemini-pro')
 
 MIN_TEMEL_PUAN = 60  
 
@@ -41,7 +35,7 @@ if not hedef_hisseler:
     exit(0)
 
 # ==============================================================================
-# 3. YF VERİ TOPLAMA VE GEMINI YAPAY ZEKA SORGUSU
+# 3. YF VERİ TOPLAMA VE GEMINI YAPAY ZEKA SORGUSU (DOĞRUDAN BAĞLANTI)
 # ==============================================================================
 for hisse in hedef_hisseler[:3]:  
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
@@ -91,16 +85,27 @@ for hisse in hedef_hisseler[:3]:
         (Şirketi 'Korunaklı/Kırılgan/Hendeksiz' olarak kategorize et ve portföye en fazla % kaç ağırlıkla alınabileceğini tavsiye et.)
         """
         
-        # ESKİ KÜTÜPHANEYLE (generate_content) ÇAĞRI YAPIYORUZ
-        response = model.generate_content(prompt)
-        rapor_metni = response.text
+        # 4. KÜTÜPHANESİZ DOĞRUDAN API İSTEĞİ (En Garantili Yol)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        headers = {'Content-Type': 'application/json'}
+        data = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
         
-        dosya_adi = f"TEFTIS_{hisse}.md"
-        with open(dosya_adi, "w", encoding="utf-8") as f:
-            f.write(rapor_metni)
+        response = requests.post(url, headers=headers, json=data)
+        response_json = response.json()
+        
+        if response.status_code == 200:
+            rapor_metni = response_json['candidates'][0]['content']['parts'][0]['text']
             
-        print(f"✅ {dosya_adi} başarıyla oluşturuldu ve kaydedildi!")
-        
+            dosya_adi = f"TEFTIS_{hisse}.md"
+            with open(dosya_adi, "w", encoding="utf-8") as f:
+                f.write(rapor_metni)
+                
+            print(f"✅ {dosya_adi} başarıyla oluşturuldu ve kaydedildi!")
+        else:
+            print(f"⚠️ API Hatası ({hisse}): {response_json}")
+            
     except Exception as e:
         print(f"⚠️ {hisse} teftişinde hata: {e}")
 
