@@ -35,7 +35,7 @@ if not hedef_hisseler:
     exit(0)
 
 # ==============================================================================
-# 3. YF VERİ TOPLAMA VE OPENAI YAPAY ZEKA SORGUSU (TEKNİK + KANTİTATİF DESTEKLİ)
+# 3. YF VERİ TOPLAMA VE OPENAI YAPAY ZEKA SORGUSU (HİBRİT MODEL)
 # ==============================================================================
 for hisse in hedef_hisseler:  
     print(f"\n⚙️ {hisse} için yapay zeka teftiş raporu hazırlanıyor...")
@@ -52,7 +52,6 @@ for hisse in hedef_hisseler:
         ticker = yf.Ticker(f"{hisse}.IS")
         info = ticker.info
         
-        # TEKNİK VERİ HESAPLAMALARI
         current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
         high_52 = info.get('fiftyTwoWeekHigh', 0)
         ma_50 = info.get('fiftyDayAverage', 0)
@@ -94,28 +93,55 @@ for hisse in hedef_hisseler:
         """
         
         prompt = f"""
-        Sen, Serkan Ünal'ın 'Borsa İstanbul İçin Hisse Seçim Rehberi' kitabındaki değer yatırımı prensiplerini uygulayan uzman ve katı bir kantitatif finansal analistsin.
+        Sen, Serkan Ünal'ın 'Borsa İstanbul İçin Hisse Seçim Rehberi' kitabının TAMAMINA hakim, değer yatırımı prensiplerini uygulayan uzman ve katı bir kantitatif finansal analistsin.
         
-        Bana {hisse} kodlu hisse senedi için tam olarak aşağıdaki 5 başlıktan oluşan ve Markdown formatında şık bir 'Yatırım Teftiş Karnesi' yaz.
-        Şirketin güncel temel, kantitatif ve teknik finansal verileri şunlardır:
+        Bana {hisse} kodlu hisse senedi için şık bir 'Hisse Değerlendirme Kartı' (Markdown formatında) yaz. 
+        SADECE SORU CEVAPLAYAN BİR MAKİNE OLMA. Serkan Ünal'ın kitabın genelindeki derin sentez, yorumlama ve sektörel vizyon yeteneğini kullanarak her bölümün başında doyurucu bir "Sentez ve Genel Değerlendirme" paragrafı yaz. 
+        Ardından, kitabın 213. ve 214. sayfalarındaki soruları kontrol listesi formatında tek tek ve şüpheci bir dille cevapla.
+        
+        Kullanacağın Veriler:
         {sirket_ozeti}
         
-        Eğer güncel verilerde bir eksiklik varsa, sektörel ve genel piyasa bilgini kullanarak destekle.
-        Dilin ciddi, şüpheli ve sadece yatırımcıyı korumaya odaklı olmalı.
-        Özellikle Bölüm 1 ve 3'te "Bizim Kantitatif Verilerimiz" (Temel Puan, Altman, Piotroski) sonuçlarını mutlak suretle Serkan Ünal perspektifiyle değerlendir.
+        Aşağıdaki şablonu birebir Markdown formatında kullan:
+
+        ### 📄 HİSSE DEĞERLENDİRME KARTI: {hisse}
         
-        **KRİTİK TALİMAT (YÖNETİM VE CEO):** Bölüm 2 (İş Kalitesi) kısmında, şirketin mevcut yönetimini ve CEO'sunu mutlaka analiz et. Şirketin kurucusundan veya tek bir kişiden bağımsız profesyonel yönetim kabiliyeti olup olmadığını, liyakati ve yönetim kadrosunun yatırımcılara güven verip vermediğini değerlendir.
-        
-        Özellikle Bölüm 4'te (Fiyat ve Güvenlik Marjı) hissenin teknik olarak zirveden ne kadar düştüğünü ve trend durumunu değerlendirerek alım için güvenli bir bölgede olup olmadığını yorumla.
-        
-        Şablon Başlıkları (Birebir bu formatı ve Markdown'u kullan):
-        ### 📄 YATIRIM TEFTİŞ KARNESİ: {hisse}
-        
-        **Bölüm 1 — Elemeler (Kırmızı Çizgiler & Kantitatif Puanlar)**
-        **Bölüm 2 — İş Kalitesi (Yönetim, CEO ve Hendek Testi)**
+        **Bölüm 1 — Elemeler (Kırmızı Çizgiler)**
+        *Sentez:* [Kitabın genel felsefesiyle şirketin temel risklerini ve kırmızı çizgilerini yorumladığın akıcı bir analist paragrafı]
+        * **Halka açıklık oranı ve hâkim ortak payı ne durumda? (Veto eşiği aşılıyor mu?)** [Cevap]
+        * **Kâr dağıtımında veya yönetim kurulunda imtiyazlı pay var mı?** [Cevap]
+        * **Hâkim ortağın sicili temiz mi? Küçük ortakları zarara uğratma öyküsü var mı?** [Cevap]
+        * **İlişkili taraflara sistematik kaynak aktarımı var mı?** [Cevap]
+        * **Borç yapısında taşınamaz bir risk (Altman Z skoru, regülasyon, tek müşteri bağımlılığı) var mı?** [Cevap]
+
+        **Bölüm 2 — İş Kalitesi (Hendek ve Yönetim Testi)**
+        *Sentez:* [Şirketin rekabet avantajını, vizyonunu, liyakatini ve tek adam riskini kitabın bütününe yayılmış felsefeyle yorumladığın paragraf]
+        * **Sektörde pazar payı istikrarlı mı? Pazara tutunabilen yeni güçlü rakip tehdidi var mı?** [Cevap]
+        * **Şirket, reel kârlılığını sürekli kılabiliyor mu? Kriz yıllarında dirençli mi?** [Cevap]
+        * **Rekabet avantajının (hendeğin) kaynağı nedir ve ne kadar dayanıklı?** [Cevap]
+        * **Şirketin kurucusundan bağımsız, liyakatli ve profesyonel bir yönetimi/CEO'su var mı? Tek adam riski taşıyor mu?** [Cevap]
+        * **Rakiplerine kıyasla reel büyüme hızı ve kâr marjlarını koruma başarısı nasıl?** [Cevap]
+
         **Bölüm 3 — Tablolar (Kârın Gerçekliği)**
-        **Bölüm 4 — Fiyat, Teknik Görünüm ve Güvenlik Marjı**
+        *Sentez:* [Bilanço okuma sanatını kullanarak kârın ne kadar gerçek, ne kadar makyajlı olduğunu yorumladığın paragraf]
+        * **Şirket açıkladığı kârı neye dönüştürüyor? (Kasa nakdi, temettü, yatırımlar)** [Cevap]
+        * **Kârın ne kadarı tekrarlanamaz tek seferlik kalemlerden kaynaklanıyor?** [Cevap]
+        * **Dipnotlarda gizlenmiş şarta bağlı yükümlülükler (TRİ) riski var mı?** [Cevap]
+        * **Master Temel Puan ve Piotroski Skoru şirketin asıl faaliyet gücünü nasıl yansıtıyor?** [Cevap]
+
+        **Bölüm 4 — Fiyat ve Güvenlik Marjı**
+        *Sentez:* [Teknik verileri ve temel çarpanları harmanlayarak hissenin ucuzluk/pahalılık durumunu yorumladığın paragraf]
+        * **Mevcut çarpanların paydasındaki rakam (kâr/özkaynak) sürdürülebilir mi?** [Cevap]
+        * **Kazanç Getirisi (1 / F/K) ile risksiz faiz arasında yeterli bir güvenlik marjı tamponu var mı?** [Cevap]
+        * **Hissenin teknik olarak zirveden düşüş oranı ve hareketli ortalama trendi alım için güvenli bölgeyi işaret ediyor mu?** [Cevap]
+        * **Hatalı analiz durumunda yatırımcıyı ayakta tutacak yanılma payı fiyatlanmış mı?** [Cevap]
+
         **Bölüm 5 — Nihai Karar & Portföy Rejimi**
+        *Sentez:* [Tüm analizlerin ışığında yatırımcıya verdiğin nihai yönlendirme paragrafı]
+        * **Şirketin nihai kategorisi nedir? (Korunaklı / Kırılgan / Hendeksiz)** [Cevap]
+        * **Bu şartlar altında portföyde hedeflenen ağırlık maksimum yüzde kaç olmalıdır?** [Cevap]
+        * **Kademeli alım (aşamalandırma) planı nasıl kurgulanmalıdır?** [Cevap]
+        * **Hangi şartlar (Hâkim ortak satışı, yönetim bozulması, fiyat şişmesi) gerçekleşirse bu pozisyondan acilen çıkılmalıdır?** [Cevap]
         """
         
         response = client.chat.completions.create(
