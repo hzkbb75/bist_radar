@@ -268,12 +268,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# TEST İÇİN SAHTE SİNYAL ATEŞLEYİCİ
-send_to_make({
-    "sembol": "FROTO", 
-    "baslik": "🚨 TEST: ACİL PATRON SATIŞI!", 
-    "zaman": "Şimdi", 
-    "kap_link": "https://www.kap.org.tr/", 
-    "ozet": "Hâkim ortak piyasaya yüklü miktarda hisse sattığını duyurdu."
-})
