@@ -159,7 +159,16 @@ for hisse in hedef_hisseler:
         )
         rapor_metni = response.choices[0].message.content
         
-        dosya_adi = f"TEFTIS_{hisse}.md"
+        # Raporların kaydedileceği klasör adı
+        klasor_adi = "teftis_raporlari"
+        
+        # Klasör yoksa oluştur
+        if not os.path.exists(klasor_adi):
+            os.makedirs(klasor_adi)
+
+        # Dosya adını klasör yoluyla birleştir
+        dosya_adi = f"{klasor_adi}/TEFTIS_{hisse}.md"
+        
         with open(dosya_adi, "w", encoding="utf-8") as f:
             f.write(rapor_metni)
             
