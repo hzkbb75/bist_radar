@@ -22,34 +22,25 @@ STATE_FILE = "son_bildirimler.json"
 # ==========================================
 # HİSSE DEĞERİNİ ETKİLEYEN 5 KRİTİK FİLTRE
 # ==========================================
-FILTRE_KELIMELER = [  
-    # 1. Ciro ve İş Hacmi (Yeni Nakit Akışı)
-    "yeni iş ilişkisi",
-    "sözleşme",
-    "ihale",
-    "sipariş",
-
-    # 2. Finansal Sonuçlar & Raporlama
-    "finansal rapor",
-    "faaliyet raporu",
-    "sorumluluk beyanı",
-
-    # 3. Sermaye & Temettü (Hisse Başı Değer / Sulandırma)
-    "sermaye artırımı",
-    "bedelli",
-    "bedelsiz",
-    "kâr payı",
-    "temettü",
-
-    # 4. Pay Piyasası & Güven Hamleleri
-    "geri alım",
-    "pay alım satım",
-
-    # 5. Kritik Gelişmeler & Yapısal Hamleler
-    "özel durum açıklaması (genel)",
-    "yatırım",
-    "birleşme",
-    "devralma"
+FILTRE_KELIMELER = [
+    "yeni iş ilişkisi",
+    "sözleşme",
+    "ihale",
+    "sipariş",
+    "finansal rapor",
+    "faaliyet raporu",
+    "sorumluluk beyanı",
+    "sermaye artırımı",
+    "bedelli",
+    "bedelsiz",
+    "kâr payı",
+    "temettü",
+    "geri alım",
+    "pay alım satım",
+    "özel durum açıklaması (genel)",
+    "yatırım",
+    "birleşme",
+    "devralma"
 ]
 
 def download_excel_file(url):
