@@ -55,19 +55,33 @@ print("🚀 BİST TÜM Görsel Hizalama Motoru Başlatıldı...")
 if not bulten_indir(PDF_DOSYA_ADI):
     raise FileNotFoundError("❌ Ziraat bülteni indirilemedi, işlem durduruldu.")
 
+# Ziraat Bülteni Orjinal Sektör Listesi
+ZIRAAT_SEKTORLER = [
+    "GİRİŞİM SERMAYESİ YATIRIM ORTAKLIKLARI", "MESLEKİ, BİLİMSEL VE TEKNİK FAALİYETLER", 
+    "PETROL & PETRO-KİMYA & GAZ", "TEKSTİL & TEKSTİL YAN SANAYİ", 
+    "KÜÇÜK VE ORTA ÖLÇEKLİ BANKALAR", "GAYRİMENKUL YATIRIM ORTAKLIKLARI",
+    "GAYRİMENKUL FAALİYETLERİ", "TURİZM, OTEL, EĞLENCE", "ELEKTRİK MALZEMELERİ",
+    "BİLGİSAYAR & YAZILIM", "TELEKOM TEKNOLOJİLERİ", "OTOMOTİV YAN SANAYİ",
+    "KİMYASAL MADDELER", "YAPI MALZEMELERİ", "DAYANIKLI TÜKETİM", 
+    "YATIRIM ORTAKLIKLARI", "BÜYÜK BANKALAR", "MENKUL DEĞERLER", "CAM & SERAMİK",
+    "DEMİR & ÇELİK", "DİĞER İMALAT", "İLAÇ & SAĞLIK", "ENERJİ İMALAT",
+    "VARLIK YÖNETİMİ", "FAKTORING", "PERAKENDE", "MADENCİLİK", "OTOMOTİV", 
+    "SİGORTA", "LEASING", "HOLDİNG", "HOLDING", "ÇİMENTO", "İNŞAAT", "MAKİNE", 
+    "İÇECEK", "MEDYA", "TARIM", "ENERJİ", "GIDA", "SPOR", "TELEKOM", "BANKALAR"
+]
+
 hisse_verileri = []
 aktif_pazar = "YILDIZ_ANA"
 aktif_sektor = "GENEL"
 
 with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
     for page in pdf.pages:
-        # Metni piksel koordinatlarıyla çekiyoruz (Sütun kaymalarını önler)
         words = page.extract_words(x_tolerance=2, y_tolerance=3)
         if not words: continue
         
         satirlar_dict = {}
         for w in words:
-            y = round(w['top'] / 4) * 4 # 4 piksel toleransla aynı satırdakileri grupla
+            y = round(w['top'] / 4) * 4 
             if y not in satirlar_dict:
                 satirlar_dict[y] = []
             satirlar_dict[y].append(w)
@@ -77,61 +91,55 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             satir = " ".join([w['text'] for w in sirali_kelimeler])
             satir_upper = satir.upper().strip()
             
-            # Pazar Filtreleri
-            if any(p in satir_upper for p in ["YAKIN İZLEME PAZARI", "ALT PAZAR", "PİYASA ÖNCESİ", "YATIRIM ORTAKLIKLARI"]):
+            if any(p in satir_upper for p in ["YAKIN İZLEME PAZARI", "ALT PAZAR", "PİYASA ÖNCESİ"]):
                 aktif_pazar = "VETO"
                 continue
 
             parcalar = satir.split()
-            # YENİ EKLENEN FİLTRE: Gerçek harf sayısını sayarak ✓, ↑, ↓ gibi işaretleri çöpe atar
-            harf_sayisi = sum(1 for c in satir_upper if c.isalpha())
             
-            if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir) and harf_sayisi > 2:
-                if satir_upper not in ["BİST-TÜM", "BİST-100", "BİST-30", "NOTLAR"]:
-                    aktif_sektor = satir_upper
-                    aktif_pazar = "YILDIZ_ANA" # Sektör değiştiğinde veto sıfırlanır
-                continue
-
+            # HİSSE KODU TESPİTİ
+            kod = ""
             if len(parcalar) >= 10:
-                # Yedek Hisse Kodu Bulucu
-                kod = ""
                 for p in parcalar:
                     if len(p) in [4, 5] and p.isalpha() and p == p.upper():
                         kod = p
                         break
                         
-                if kod and aktif_pazar != "VETO":
-                    try:
-                        # Ziraat en sağa tekrar hisse kodu yazar, bunu tespit edip ofset atıyoruz.
-                        offset = 1 if parcalar[-1].isalpha() else 0
-                        
-                        # Sağdan sola MİLİMETRİK sütun okuma
-                        net_borc_favok = sayi_donustur(parcalar[-1 - offset])
-                        pd_s = sayi_donustur(parcalar[-2 - offset])
-                        fd_favok = sayi_donustur(parcalar[-3 - offset])
-                        pddd = sayi_donustur(parcalar[-4 - offset])
-                        fk = sayi_donustur(parcalar[-5 - offset])
-                        roe = sayi_donustur(parcalar[-6 - offset])
-                        roa = sayi_donustur(parcalar[-7 - offset])
-                        
-                        # Soldan sağa okuyarak 2. Yüzdeli ifadeyi (Halka Açıklık) tespit etme
-                        yuzdeler = [p for p in parcalar if "%" in p]
-                        halka_aciklik = sayi_donustur(yuzdeler[1]) if len(yuzdeler) >= 2 else 0.0
-                        
-                        hisse_verileri.append({
-                            "Hisse": kod,
-                            "Sektor": aktif_sektor,
-                            "Halka_Aciklik": halka_aciklik,
-                            "ROA": roa,
-                            "ROE": roe,
-                            "FK": fk,
-                            "PDDD": pddd,
-                            "FD_FAVOK": fd_favok,
-                            "PDS": pd_s,
-                            "NetBorc_FAVOK": net_borc_favok
-                        })
-                    except:
-                        pass
+            if kod and aktif_pazar != "VETO":
+                try:
+                    offset = 1 if parcalar[-1].isalpha() else 0
+                    net_borc_favok = sayi_donustur(parcalar[-1 - offset])
+                    pd_s = sayi_donustur(parcalar[-2 - offset])
+                    fd_favok = sayi_donustur(parcalar[-3 - offset])
+                    pddd = sayi_donustur(parcalar[-4 - offset])
+                    fk = sayi_donustur(parcalar[-5 - offset])
+                    roe = sayi_donustur(parcalar[-6 - offset])
+                    roa = sayi_donustur(parcalar[-7 - offset])
+                    
+                    yuzdeler = [p for p in parcalar if "%" in p]
+                    halka_aciklik = sayi_donustur(yuzdeler[1]) if len(yuzdeler) >= 2 else 0.0
+                    
+                    hisse_verileri.append({
+                        "Hisse": kod,
+                        "Sektor": aktif_sektor,
+                        "Halka_Aciklik": halka_aciklik,
+                        "ROA": roa,
+                        "ROE": roe,
+                        "FK": fk,
+                        "PDDD": pddd,
+                        "FD_FAVOK": fd_favok,
+                        "PDS": pd_s,
+                        "NetBorc_FAVOK": net_borc_favok
+                    })
+                except:
+                    pass
+            else:
+                # EĞER HİSSE KODU YOKSA -> KESİN SEKTÖR KONTROLÜ
+                for bilinen_sektor in ZIRAAT_SEKTORLER:
+                    if satir_upper == bilinen_sektor or satir_upper.startswith(bilinen_sektor + " "):
+                        aktif_sektor = bilinen_sektor
+                        aktif_pazar = "YILDIZ_ANA"
+                        break
 
 # --- 5. GELİŞMİŞ DİNAMİK SEKTÖR MEDYANLARI ---
 sektor_havuzu = {}
