@@ -50,29 +50,22 @@ def sayi_donustur(deger):
     try: return float(temiz)
     except: return 0.0
 
-# --- 4. KOORDİNAT BAZLI (PİKSEL) PARÇALAMA & VETO MOTORU ---
-print("🚀 BİST TÜM Görsel Hizalama Motoru Başlatıldı...")
+# --- 4. SÖZLÜK (JSON) BAZLI PARÇALAMA & VETO MOTORU ---
+print("🚀 BİST TÜM Özel Sözlük Motoru Başlatıldı...")
 if not bulten_indir(PDF_DOSYA_ADI):
     raise FileNotFoundError("❌ Ziraat bülteni indirilemedi, işlem durduruldu.")
 
-# Ziraat Bülteni Orjinal Sektör Listesi
-ZIRAAT_SEKTORLER = [
-    "GİRİŞİM SERMAYESİ YATIRIM ORTAKLIKLARI", "MESLEKİ, BİLİMSEL VE TEKNİK FAALİYETLER", 
-    "PETROL & PETRO-KİMYA & GAZ", "TEKSTİL & TEKSTİL YAN SANAYİ", 
-    "KÜÇÜK VE ORTA ÖLÇEKLİ BANKALAR", "GAYRİMENKUL YATIRIM ORTAKLIKLARI",
-    "GAYRİMENKUL FAALİYETLERİ", "TURİZM, OTEL, EĞLENCE", "ELEKTRİK MALZEMELERİ",
-    "BİLGİSAYAR & YAZILIM", "TELEKOM TEKNOLOJİLERİ", "OTOMOTİV YAN SANAYİ",
-    "KİMYASAL MADDELER", "YAPI MALZEMELERİ", "DAYANIKLI TÜKETİM", 
-    "YATIRIM ORTAKLIKLARI", "BÜYÜK BANKALAR", "MENKUL DEĞERLER", "CAM & SERAMİK",
-    "DEMİR & ÇELİK", "DİĞER İMALAT", "İLAÇ & SAĞLIK", "ENERJİ İMALAT",
-    "VARLIK YÖNETİMİ", "FAKTORING", "PERAKENDE", "MADENCİLİK", "OTOMOTİV", 
-    "SİGORTA", "LEASING", "HOLDİNG", "HOLDING", "ÇİMENTO", "İNŞAAT", "MAKİNE", 
-    "İÇECEK", "MEDYA", "TARIM", "ENERJİ", "GIDA", "SPOR", "TELEKOM", "BANKALAR"
-]
+# 1. Sizin Hazırladığınız Özel Sektör Sözlüğünü Yükle
+sektor_sozluk = {}
+json_path = "bist_sektorler.json"
+if os.path.exists(json_path):
+    with open(json_path, "r", encoding="utf-8") as f:
+        sektor_sozluk = json.load(f)
+else:
+    print("⚠️ bist_sektorler.json bulunamadı, tüm hisseler 'GENEL' sektörüne atanacak.")
 
 hisse_verileri = []
 aktif_pazar = "YILDIZ_ANA"
-aktif_sektor = "GENEL"
 
 with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
     for page in pdf.pages:
@@ -91,13 +84,18 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             satir = " ".join([w['text'] for w in sirali_kelimeler])
             satir_upper = satir.upper().strip()
             
-            if any(p in satir_upper for p in ["YAKIN İZLEME PAZARI", "ALT PAZAR", "PİYASA ÖNCESİ"]):
+            # Pazar Filtreleri (Ziraat'in çöplerini elemek için hala gerekli)
+            if any(p in satir_upper for p in ["YAKIN İZLEME PAZARI", "ALT PAZAR", "PİYASA ÖNCESİ", "YATIRIM ORTAKLIKLARI"]):
                 aktif_pazar = "VETO"
                 continue
-
-            parcalar = satir.split()
             
-            # HİSSE KODU TESPİTİ
+            # Eğer sektör başlığı değişiyorsa vetoyu kaldır (Yıldız Ana'ya dön)
+            parcalar = satir.split()
+            if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir):
+                aktif_pazar = "YILDIZ_ANA"
+                continue
+
+            # 2. HİSSE VERİSİ TESPİTİ VE ÖZEL SEKTÖR ATAMASI
             kod = ""
             if len(parcalar) >= 10:
                 for p in parcalar:
@@ -108,40 +106,24 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             if kod and aktif_pazar != "VETO":
                 try:
                     offset = 1 if parcalar[-1].isalpha() else 0
-                    net_borc_favok = sayi_donustur(parcalar[-1 - offset])
-                    pd_s = sayi_donustur(parcalar[-2 - offset])
-                    fd_favok = sayi_donustur(parcalar[-3 - offset])
-                    pddd = sayi_donustur(parcalar[-4 - offset])
-                    fk = sayi_donustur(parcalar[-5 - offset])
-                    roe = sayi_donustur(parcalar[-6 - offset])
-                    roa = sayi_donustur(parcalar[-7 - offset])
                     
-                    yuzdeler = [p for p in parcalar if "%" in p]
-                    halka_aciklik = sayi_donustur(yuzdeler[1]) if len(yuzdeler) >= 2 else 0.0
+                    # Hissenin sektörünü SİZİN json dosyanızdan bul, yoksa 'DİĞER' yaz.
+                    kisisel_sektor = sektor_sozluk.get(kod, "DİĞER")
                     
                     hisse_verileri.append({
                         "Hisse": kod,
-                        "Sektor": aktif_sektor,
-                        "Halka_Aciklik": halka_aciklik,
-                        "ROA": roa,
-                        "ROE": roe,
-                        "FK": fk,
-                        "PDDD": pddd,
-                        "FD_FAVOK": fd_favok,
-                        "PDS": pd_s,
-                        "NetBorc_FAVOK": net_borc_favok
+                        "Sektor": kisisel_sektor,  # <-- Artık tertemiz "KİMYA", "BANKA" gelecek
+                        "FK": sayi_donustur(parcalar[-5 - offset]),
+                        "PDDD": sayi_donustur(parcalar[-4 - offset]),
+                        "FD_FAVOK": sayi_donustur(parcalar[-3 - offset]),
+                        "PDS": sayi_donustur(parcalar[-2 - offset]),
+                        "NetBorc_FAVOK": sayi_donustur(parcalar[-1 - offset]),
+                        "Halka_Aciklik": sayi_donustur([p for p in parcalar if "%" in p][1]) if len([p for p in parcalar if "%" in p]) >= 2 else 0.0
                     })
                 except:
                     pass
-            else:
-                # EĞER HİSSE KODU YOKSA -> KESİN SEKTÖR KONTROLÜ
-                for bilinen_sektor in ZIRAAT_SEKTORLER:
-                    if satir_upper == bilinen_sektor or satir_upper.startswith(bilinen_sektor + " "):
-                        aktif_sektor = bilinen_sektor
-                        aktif_pazar = "YILDIZ_ANA"
-                        break
 
-# --- 5. GELİŞMİŞ DİNAMİK SEKTÖR MEDYANLARI ---
+# --- 5. ÖZEL GRUPLARA GÖRE DİNAMİK SEKTÖR MEDYANLARI (KENDİ HESABIMIZ) ---
 sektor_havuzu = {}
 for h in hisse_verileri:
     s = h["Sektor"]
@@ -156,6 +138,7 @@ for h in hisse_verileri:
 
 sektor_medyanlari = {}
 for s, vals in sektor_havuzu.items():
+    # Sizin temizlediğiniz sektörlere göre (örn: Tüm "BANKA"lar) medyan alıyoruz.
     sektor_medyanlari[s] = {
         "m_fk": statistics.median(vals["fk"]) if vals["fk"] else 12.0,
         "m_pddd": statistics.median(vals["pddd"]) if vals["pddd"] else 1.5,
