@@ -8,7 +8,6 @@ import statistics
 import csv
 from datetime import datetime, timedelta
 
-# --- 1. KURULUM KONTROLÜ ---
 try:
     import pdfplumber
 except ImportError:
@@ -18,14 +17,13 @@ except ImportError:
 
 import pandas as pd
 
-# --- 2. AYARLAR & ENTEGRASYONLAR ---
+# --- AYARLAR ---
 MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf7c"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8897693829:AAEHKHoRKSN-h3RRRU60bDCq3wcuLstivI4")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "932085366")
 PDF_DOSYA_ADI = "bulten.pdf"
 MASTER_BILANCO_DOSYASI = "master_bilanco_bist_tum.csv"
 
-# --- 3. BÜLTENİ OTOMATİK İNDİRME ---
 def bulten_indir(hedef_dosya="bulten.pdf"):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -53,72 +51,79 @@ def sayi_donustur(deger):
     try: return float(temiz)
     except: return 0.0
 
-# --- 4. MASTER BİLANÇO ÜZERİNDEN SEKTÖR VE PİOTROSKİ SÖZLÜKLERİNİ KURMA ---
-sektor_sozluk = {}
+# --- 1. PIOTROSKI SKORLARINI MASTER DOSYADAN OKU ---
 piotroski_sozluk = {}
-
 if os.path.exists(MASTER_BILANCO_DOSYASI):
-    # Ayırıcıyı (, veya ;) otomatik tespit et ve Türkçe karakterleri normalize et
     try:
-        df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=None, engine='python', encoding='utf-8-sig')
-    except Exception:
-        df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=';', encoding='latin1')
+        df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=None, engine='python')
+        df_m.columns = [str(c).strip().upper() for c in df_m.columns]
+        h_col = next((c for c in df_m.columns if "HISSE" in c), None)
+        p_col = next((c for c in df_m.columns if "PIOT" in c), None)
+        if h_col and p_col:
+            for _, r in df_m.iterrows():
+                if pd.notna(r[h_col]) and pd.notna(r[p_col]):
+                    piotroski_sozluk[str(r[h_col]).strip().upper()] = r[p_col]
+            print(f"✅ {len(piotroski_sozluk)} hisse için Piotroski skoru yüklendi.")
+    except Exception as e:
+        print(f"⚠️ Master bilanço okuma hatası: {e}")
 
-    # Kolon isimlerindeki boşlukları sil ve büyük harfe çevir
-    df_m.columns = [str(c).strip().upper().replace("İ", "I") for c in df_m.columns]
-    
-    hisse_kol = next((c for c in df_m.columns if "HISSE" in c or "KOD" in c), None)
-    sektor_kol = next((c for c in df_m.columns if "SEKT" in c), None)
-    piot_kol = next((c for c in df_m.columns if "PIOT" in c), None)
-    
-    if hisse_kol and sektor_kol:
-        for _, r in df_m.iterrows():
-            kod = str(r[hisse_kol]).strip().upper()
-            if kod and pd.notna(r[sektor_kol]):
-                sektor_sozluk[kod] = str(r[sektor_kol]).strip().upper()
-            if piot_kol and pd.notna(r[piot_kol]):
-                piotroski_sozluk[kod] = r[piot_kol]
-        print(f"✅ Sektörler CSV'den başarıyla yüklendi: {len(sektor_sozluk)} hisse")
-    else:
-        print(f"⚠️ Sütunlar eşleşmedi! Mevcut kolonlar: {list(df_m.columns)}")
-else:
-    print(f"⚠️ {MASTER_BILANCO_DOSYASI} bulunamadı!")
-
-# --- 5. KOORDİNAT BAZLI (PİKSEL) PARÇALAMA & VETO MOTORU ---
-print("🚀 BİST TÜM PDF Çarpan Çekme Motoru Başlatıldı...")
+# --- 2. ZİRAAT BÜLTENİ SEKTÖRLERİYLE KAZIMA MOTORU ---
+print("🚀 BİST TÜM Çarpan Motoru Başlatıldı...")
 if not bulten_indir(PDF_DOSYA_ADI):
-    raise FileNotFoundError("❌ Ziraat bülteni indirilemedi, işlem durduruldu.")
+    raise FileNotFoundError("❌ Ziraat bülteni indirilemedi.")
+
+ZIRAAT_SEKTORLER = [
+    "GİRİŞİM SERMAYESİ YATIRIM ORTAKLIKLARI", "MESLEKİ, BİLİMSEL VE TEKNİK FAALİYETLER", 
+    "PETROL & PETRO-KİMYA & GAZ", "TEKSTİL & TEKSTİL YAN SANAYİ", 
+    "KÜÇÜK VE ORTA ÖLÇEKLİ BANKALAR", "GAYRİMENKUL YATIRIM ORTAKLIKLARI",
+    "GAYRİMENKUL FAALİYETLERİ", "TURİZM, OTEL, EĞLENCE", "ELEKTRİK MALZEMELERİ",
+    "BİLGİSAYAR & YAZILIM", "TELEKOM TEKNOLOJİLERİ", "OTOMOTİV YAN SANAYİ",
+    "KİMYASAL MADDELER", "YAPI MALZEMELERİ", "DAYANIKLI TÜKETİM", 
+    "YATIRIM ORTAKLIKLARI", "BÜYÜK BANKALAR", "MENKUL DEĞERLER", "CAM & SERAMİK",
+    "DEMİR & ÇELİK", "DİĞER İMALAT", "İLAÇ & SAĞLIK", "ENERJİ İMALAT",
+    "VARLIK YÖNETİMİ", "FAKTORING", "PERAKENDE", "MADENCİLİK", "OTOMOTİV", 
+    "SİGORTA", "LEASING", "HOLDİNG", "HOLDING", "ÇİMENTO", "İNŞAAT", "MAKİNE", 
+    "İÇECEK", "MEDYA", "TARIM", "ENERJİ", "GIDA", "SPOR", "TELEKOM", "BANKALAR"
+]
+
+def metin_temizle(m):
+    return m.replace("İ","I").replace("Ğ","G").replace("Ü","U").replace("Ş","S").replace("Ö","O").replace("Ç","C").strip()
+
+TEMIZ_SEKTORLER = [metin_temizle(s) for s in ZIRAAT_SEKTORLER]
 
 hisse_verileri = []
 aktif_pazar = "YILDIZ_ANA"
+aktif_sektor = "GENEL"
 
 with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
     for page in pdf.pages:
         words = page.extract_words(x_tolerance=2, y_tolerance=3)
         if not words: continue
-        
         satirlar_dict = {}
         for w in words:
             y = round(w['top'] / 4) * 4 
-            if y not in satirlar_dict:
-                satirlar_dict[y] = []
+            if y not in satirlar_dict: satirlar_dict[y] = []
             satirlar_dict[y].append(w)
             
         for y in sorted(satirlar_dict.keys()):
-            sirali_kelimeler = sorted(satirlar_dict[y], key=lambda x: x['x0'])
-            satir = " ".join([w['text'] for w in sirali_kelimeler])
+            satir = " ".join([w['text'] for w in sorted(satirlar_dict[y], key=lambda x: x['x0'])])
             satir_upper = satir.upper().strip()
-            
-            # Pazar Filtreleri
-            if any(p in satir_upper for p in ["YAKIN İZLEME PAZARI", "ALT PAZAR", "PİYASA ÖNCESİ", "YATIRIM ORTAKLIKLARI"]):
+            satir_upper_temiz = metin_temizle(satir_upper)
+
+            if any(p in satir_upper_temiz for p in ["YAKIN IZLEME", "ALT PAZAR", "PIYASA ONCESI"]):
                 aktif_pazar = "VETO"
                 continue
 
             parcalar = satir.split()
-            if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir):
+
+            # Sektör Başlığı Kontrolü
+            bulunan_sektor = next((orijinal for temiz, orijinal in zip(TEMIZ_SEKTORLER, ZIRAAT_SEKTORLER) if satir_upper_temiz.startswith(temiz)), None)
+            if bulunan_sektor and len(satir_upper) < 45:
+                aktif_sektor = bulunan_sektor
                 aktif_pazar = "YILDIZ_ANA"
                 continue
 
+            # Hisse Tespiti
             kod = ""
             if len(parcalar) >= 10:
                 for p in parcalar:
@@ -129,39 +134,25 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             if kod and aktif_pazar != "VETO":
                 try:
                     offset = 1 if parcalar[-1].isalpha() else 0
-                    
-                    # Sektörü doğrudan master bilançodan çek
-                    sektor = sektor_sozluk.get(kod, "DİĞER")
-                    
-                    net_borc_favok = sayi_donustur(parcalar[-1 - offset])
-                    pd_s = sayi_donustur(parcalar[-2 - offset])
-                    fd_favok = sayi_donustur(parcalar[-3 - offset])
-                    pddd = sayi_donustur(parcalar[-4 - offset])
-                    fk = sayi_donustur(parcalar[-5 - offset])
-                    
-                    yuzdeler = [p for p in parcalar if "%" in p]
-                    halka_aciklik = sayi_donustur(yuzdeler[1]) if len(yuzdeler) >= 2 else 0.0
-                    
                     hisse_verileri.append({
                         "Hisse": kod,
-                        "Sektor": sektor,
-                        "Halka_Aciklik": halka_aciklik,
-                        "FK": fk,
-                        "PDDD": pddd,
-                        "FD_FAVOK": fd_favok,
-                        "PDS": pd_s,
-                        "NetBorc_FAVOK": net_borc_favok
+                        "Sektor": aktif_sektor,
+                        "Halka_Aciklik": sayi_donustur([p for p in parcalar if "%" in p][1]) if len([p for p in parcalar if "%" in p]) >= 2 else 0.0,
+                        "FK": sayi_donustur(parcalar[-5 - offset]),
+                        "PDDD": sayi_donustur(parcalar[-4 - offset]),
+                        "FD_FAVOK": sayi_donustur(parcalar[-3 - offset]),
+                        "PDS": sayi_donustur(parcalar[-2 - offset]),
+                        "NetBorc_FAVOK": sayi_donustur(parcalar[-1 - offset])
                     })
                 except:
                     pass
 
-# --- 6. CSV SEKTÖRLERİNE GÖRE DİNAMİK MEDYAN HESABI ---
+# --- 3. DİNAMİK SEKTÖR MEDYANLARI ---
 sektor_havuzu = {}
 for h in hisse_verileri:
     s = h["Sektor"]
     if s not in sektor_havuzu:
         sektor_havuzu[s] = {"fk": [], "pddd": [], "fd_favok": [], "pds": [], "nbf": []}
-    
     if h["FK"] > 0: sektor_havuzu[s]["fk"].append(h["FK"])
     if h["PDDD"] > 0: sektor_havuzu[s]["pddd"].append(h["PDDD"])
     if h["FD_FAVOK"] > 0: sektor_havuzu[s]["fd_favok"].append(h["FD_FAVOK"])
@@ -178,7 +169,7 @@ for s, vals in sektor_havuzu.items():
         "m_nbf": statistics.median(vals["nbf"]) if vals["nbf"] else 2.0
     }
 
-# --- 7. DEĞERLEME MOTORU & PROSPEKTİF F/K ---
+# --- 4. DEĞERLEME & PROSPEKTİF F/K ---
 guncellenecek_paketler = []
 for h in hisse_verileri:
     sektor = h["Sektor"]
@@ -198,10 +189,13 @@ for h in hisse_verileri:
     elif oran <= 1.15: h["Durum"] = "🟡 Dengeli"
     else: h["Durum"] = "🔴 Pahalı"
 
-    f_skor = piotroski_sozluk.get(h["Hisse"], "-")
+    f_skor = piotroski_sozluk.get(h["Hisse"], None)
     try:
-        g = (float(f_skor) - 4.5) * 0.06
-        h["Prospektif_FK"] = max(round(fk / (1.0 + g), 2), 0.5) if fk > 0 else 0.0
+        if f_skor is not None:
+            g = (float(f_skor) - 4.5) * 0.06
+            h["Prospektif_FK"] = max(round(fk / (1.0 + g), 2), 0.5) if fk > 0 else 0.0
+        else:
+            h["Prospektif_FK"] = fk
     except:
         h["Prospektif_FK"] = fk
 
@@ -215,11 +209,10 @@ for h in hisse_verileri:
 
 guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
 
-# --- 8. POWER BI İÇİN CSV ÇIKTISI (GITHUB) ---
+# --- 5. CSV YAZMA ---
 csv_dosya = "ziraat_carpanlar.csv"
 csv_basliklar = ["Hisse", "Sektor", "Halka_Aciklik", "FK", "PDDD", "FD_FAVOK", "PDS", "NetBorc_FAVOK", 
                  "Prospektif_FK", "Durum", "Sektor_FK", "Sektor_PDDD", "Sektor_FDFAVOK", "Sektor_PDS", "Sektor_NBF"]
-
 try:
     with open(csv_dosya, mode="w", encoding="utf-8-sig", newline="") as dosya:
         yazici = csv.DictWriter(dosya, fieldnames=csv_basliklar, extrasaction='ignore')
@@ -228,7 +221,7 @@ try:
 except Exception as e:
     print(f"⚠️ CSV hatası: {e}")
 
-# --- 9. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM ---
+# --- 6. EXCEL'E MAKE.COM AKTARIMI ---
 matris_verisi = []
 for h in guncellenecek_paketler:
     matris_verisi.append([
@@ -245,18 +238,16 @@ payload = {
 }
 try:
     requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-    print("🎉 15 Sütunluk Zengin Veri Excel'e Aktarıldı!")
-except Exception as e:
-    print(f"⚠️ Make.com hatası: {e}")
+except Exception:
+    pass
 
-# --- 10. TELEGRAM RAPORU ---
+# --- 7. TELEGRAM BİLDİRİMİ ---
 iskontolular = [x for x in guncellenecek_paketler if x["Durum"] == "🟢 İskontolu" and x["FK"] > 0]
 top_10 = sorted(iskontolular, key=lambda x: x["FK"])[:10]
 
 mesaj = f"📊 *BİST TÜM DEĞERLEME RAPORU*\n🔎 Analiz Edilen: `{len(guncellenecek_paketler)}` Hisse\n\n🏆 *Top 10 İskonto:*\n"
 for h in top_10:
     mesaj += f"• *{h['Hisse']}* ({h['Sektor']}): F/K: `{h['FK']}` | PD/DD: `{h['PDDD']}`\n"
-
 try:
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
                   json={"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}, timeout=15)
