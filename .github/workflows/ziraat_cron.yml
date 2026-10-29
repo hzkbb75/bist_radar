@@ -25,3 +25,11 @@ jobs:
 
       - name: Çarpan Motorunu Çalıştır
         run: python ziraat_carpanlar.py
+        
+      - name: CSV Dosyasını Repoya Kaydet
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add ziraat_carpanlar.csv
+          git commit -m "auto: ziraat carpanlar guncellendi" || exit 0
+          git push
