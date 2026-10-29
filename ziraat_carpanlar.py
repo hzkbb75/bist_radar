@@ -28,6 +28,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8897693829:AAEHKHoRKSN-h3R
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "932085366")
 PDF_DOSYA_ADI = "bulten.pdf"
 MASTER_BILANCO_DOSYASI = "master_bilanco_bist_tum.csv"
+JSON_SEKTOR_DOSYASI = "bist_sektorler.json"
 
 # --- 3. BÜLTENİ OTOMATİK İNDİRME MOTORU (GÜÇLENDİRİLMİŞ) ---
 def bulten_indir(hedef_dosya="bulten.pdf"):
@@ -37,7 +38,6 @@ def bulten_indir(hedef_dosya="bulten.pdf"):
         "Referer": "https://www.ziraatyatirim.com.tr/"
     }
     bugun = datetime.today()
-    # Tatil günlerini ve hafta sonlarını rahatça aşabilmesi için geriye dönük 10 gün tarama
     for i in range(10):
         tarih = bugun - timedelta(days=i)
         tarih_str = tarih.strftime("%d%m%Y")
@@ -78,33 +78,28 @@ if os.path.exists(MASTER_BILANCO_DOSYASI):
     except Exception as e:
         print(f"⚠️ Master bilanço okuma hatası: {e}")
 
-# --- 5. ZİRAAT BÜLTENİ SEKTÖRLERİYLE KAZIMA & PİKSEL MOTORU ---
+# --- 5. BİST SEKTÖR SÖZLÜĞÜNÜ (JSON) YÜKLEME ---
+sektor_sozluk = {}
+if os.path.exists(JSON_SEKTOR_DOSYASI):
+    try:
+        with open(JSON_SEKTOR_DOSYASI, "r", encoding="utf-8") as f:
+            sektor_sozluk = json.load(f)
+        print(f"✅ {len(sektor_sozluk)} hisselik BİST sektör sözlüğü başarıyla yüklendi.")
+    except Exception as e:
+        print(f"⚠️ Sektör JSON dosyası okuma hatası: {e}")
+else:
+    print(f"⚠️ {JSON_SEKTOR_DOSYASI} bulunamadı!")
+
+# --- 6. KOORDİNAT BAZLI PDF KAZIMA MOTORU ---
 print("🚀 BİST TÜM Çarpan Motoru Başlatıldı...")
 if not bulten_indir(PDF_DOSYA_ADI):
     raise FileNotFoundError("❌ Ziraat bülteni indirilemedi, işlem durduruldu.")
 
-ZIRAAT_SEKTORLER = [
-    "GİRİŞİM SERMAYESİ YATIRIM ORTAKLIKLARI", "MESLEKİ, BİLİMSEL VE TEKNİK FAALİYETLER", 
-    "PETROL & PETRO-KİMYA & GAZ", "TEKSTİL & TEKSTİL YAN SANAYİ", 
-    "KÜÇÜK VE ORTA ÖLÇEKLİ BANKALAR", "GAYRİMENKUL YATIRIM ORTAKLIKLARI",
-    "GAYRİMENKUL FAALİYETLERİ", "TURİZM, OTEL, EĞLENCE", "ELEKTRİK MALZEMELERİ",
-    "BİLGİSAYAR & YAZILIM", "TELEKOM TEKNOLOJİLERİ", "OTOMOTİV YAN SANAYİ",
-    "KİMYASAL MADDELER", "YAPI MALZEMELERİ", "DAYANIKLI TÜKETİM", 
-    "YATIRIM ORTAKLIKLARI", "BÜYÜK BANKALAR", "MENKUL DEĞERLER", "CAM & SERAMİK",
-    "DEMİR & ÇELİK", "DİĞER İMALAT", "İLAÇ & SAĞLIK", "ENERJİ İMALAT",
-    "VARLIK YÖNETİMİ", "FAKTORING", "PERAKENDE", "MADENCİLİK", "OTOMOTİV", 
-    "SİGORTA", "LEASING", "HOLDİNG", "HOLDING", "ÇİMENTO", "İNŞAAT", "MAKİNE", 
-    "İÇECEK", "MEDYA", "TARIM", "ENERJİ", "GIDA", "SPOR", "TELEKOM", "BANKALAR"
-]
-
 def metin_temizle(m):
     return m.replace("İ","I").replace("Ğ","G").replace("Ü","U").replace("Ş","S").replace("Ö","O").replace("Ç","C").strip()
 
-TEMIZ_SEKTORLER = [metin_temizle(s) for s in ZIRAAT_SEKTORLER]
-
 hisse_verileri = []
 aktif_pazar = "YILDIZ_ANA"
-aktif_sektor = "GENEL"
 
 with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
     for page in pdf.pages:
@@ -128,11 +123,10 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
 
             parcalar = satir.split()
 
-            # Sektör Başlığı Kontrolü
-            bulunan_sektor = next((orijinal for temiz, orijinal in zip(TEMIZ_SEKTORLER, ZIRAAT_SEKTORLER) if satir_upper_temiz.startswith(temiz)), None)
-            if bulunan_sektor and len(satir_upper) < 45:
-                aktif_sektor = bulunan_sektor
-                aktif_pazar = "YILDIZ_ANA"
+            # Pazar Başlığı Değişimi Kontrolü
+            if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir):
+                if not any(p in satir_upper_temiz for p in ["YAKIN IZLEME", "ALT PAZAR", "PIYASA ONCESI"]):
+                    aktif_pazar = "YILDIZ_ANA"
                 continue
 
             # Hisse Kodu Tespiti
@@ -146,9 +140,13 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             if kod and aktif_pazar != "VETO":
                 try:
                     offset = 1 if parcalar[-1].isalpha() else 0
+                    
+                    # Sektörü JSON sözlüğünden al, yoksa "DİĞER" yap
+                    sektor = sektor_sozluk.get(kod, "DİĞER")
+                    
                     hisse_verileri.append({
                         "Hisse": kod,
-                        "Sektor": aktif_sektor,
+                        "Sektor": sektor,
                         "Halka_Aciklik": sayi_donustur([p for p in parcalar if "%" in p][1]) if len([p for p in parcalar if "%" in p]) >= 2 else 0.0,
                         "FK": sayi_donustur(parcalar[-5 - offset]),
                         "PDDD": sayi_donustur(parcalar[-4 - offset]),
@@ -159,7 +157,7 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                 except Exception:
                     pass
 
-# --- 6. DİNAMİK SEKTÖR MEDYANLARI (HESAPLANMIŞ MEDYAN) ---
+# --- 7. DİNAMİK SEKTÖR MEDYANLARI (HESAPLANMIŞ MEDYAN) ---
 sektor_havuzu = {}
 for h in hisse_verileri:
     s = h["Sektor"]
@@ -181,7 +179,7 @@ for s, vals in sektor_havuzu.items():
         "m_nbf": statistics.median(vals["nbf"]) if vals["nbf"] else 2.0
     }
 
-# --- 7. DEĞERLEME MOTORU & PROSPEKTİF F/K ---
+# --- 8. DEĞERLEME MOTORU & PROSPEKTİF F/K ---
 guncellenecek_paketler = []
 for h in hisse_verileri:
     sektor = h["Sektor"]
@@ -221,7 +219,7 @@ for h in hisse_verileri:
 
 guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
 
-# --- 8. POWER BI İÇİN CSV ÇIKTISI (GITHUB REPOSU) ---
+# --- 9. POWER BI İÇİN CSV ÇIKTISI (GITHUB REPOSU) ---
 csv_dosya = "ziraat_carpanlar.csv"
 csv_basliklar = [
     "Hisse", "Sektor", "Halka_Aciklik", "FK", "PDDD", "FD_FAVOK", "PDS", "NetBorc_FAVOK", 
@@ -236,7 +234,7 @@ try:
 except Exception as e:
     print(f"⚠️ CSV hatası: {e}")
 
-# --- 9. MAKE.COM WEBHOOK İLE EXCEL AKTARIMI ---
+# --- 10. MAKE.COM WEBHOOK İLE EXCEL AKTARIMI ---
 matris_verisi = []
 for h in guncellenecek_paketler:
     matris_verisi.append([
@@ -257,7 +255,7 @@ try:
 except Exception as e:
     print(f"⚠️ Make.com hatası: {e}")
 
-# --- 10. TELEGRAM RAPORU BİLDİRİMİ ---
+# --- 11. TELEGRAM RAPORU BİLDİRİMİ ---
 iskontolular = [x for x in guncellenecek_paketler if x["Durum"] == "🟢 İskontolu" and x["FK"] > 0]
 top_10 = sorted(iskontolular, key=lambda x: x["FK"])[:10]
 
