@@ -58,32 +58,31 @@ sektor_sozluk = {}
 piotroski_sozluk = {}
 
 if os.path.exists(MASTER_BILANCO_DOSYASI):
+    # Ayırıcıyı (, veya ;) otomatik tespit et ve Türkçe karakterleri normalize et
     try:
-        # Otomatik ayırıcı algılama (noktalı virgül ; veya virgül , fark etmez)
         df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=None, engine='python', encoding='utf-8-sig')
     except Exception:
         df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=';', encoding='latin1')
 
-    # Kolon isimlerindeki boşlukları temizle
-    df_m.columns = [c.strip() for c in df_m.columns]
+    # Kolon isimlerindeki boşlukları sil ve büyük harfe çevir
+    df_m.columns = [str(c).strip().upper().replace("İ", "I") for c in df_m.columns]
     
-    # Sektör ve Hisse kolonlarını bul
-    sektor_kolonu = next((c for c in df_m.columns if "SEKT" in c.upper()), None)
-    hisse_kolonu = next((c for c in df_m.columns if "HISSE" in c.upper()), None)
-    piotroski_kolonu = next((c for c in df_m.columns if "PIOT" in c.upper()), None)
+    hisse_kol = next((c for c in df_m.columns if "HISSE" in c or "KOD" in c), None)
+    sektor_kol = next((c for c in df_m.columns if "SEKT" in c), None)
+    piot_kol = next((c for c in df_m.columns if "PIOT" in c), None)
     
-    if hisse_kolonu and sektor_kolonu:
+    if hisse_kol and sektor_kol:
         for _, r in df_m.iterrows():
-            kod = str(r[hisse_kolonu]).strip().upper()
-            if kod and pd.notna(r[sektor_kolonu]):
-                sektor_sozluk[kod] = str(r[sektor_kolonu]).strip().upper()
-            if piotroski_kolonu and pd.notna(r[piotroski_kolonu]):
-                piotroski_sozluk[kod] = r[piotroski_kolonu]
-        print(f"✅ Sektörler başarıyla bağlandı! Toplam eşleşen hisse: {len(sektor_sozluk)}")
+            kod = str(r[hisse_kol]).strip().upper()
+            if kod and pd.notna(r[sektor_kol]):
+                sektor_sozluk[kod] = str(r[sektor_kol]).strip().upper()
+            if piot_kol and pd.notna(r[piot_kol]):
+                piotroski_sozluk[kod] = r[piot_kol]
+        print(f"✅ Sektörler CSV'den başarıyla yüklendi: {len(sektor_sozluk)} hisse")
     else:
-        print("⚠️ CSV okundu ancak 'Hisse' veya 'Sektör' sütun başlığı bulunamadı.")
+        print(f"⚠️ Sütunlar eşleşmedi! Mevcut kolonlar: {list(df_m.columns)}")
 else:
-    print(f"⚠️ {MASTER_BILANCO_DOSYASI} dosyası Python'ın çalıştığı klasörde bulunamadı!")
+    print(f"⚠️ {MASTER_BILANCO_DOSYASI} bulunamadı!")
 
 # --- 5. KOORDİNAT BAZLI (PİKSEL) PARÇALAMA & VETO MOTORU ---
 print("🚀 BİST TÜM PDF Çarpan Çekme Motoru Başlatıldı...")
