@@ -100,11 +100,14 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                         continue 
                     
                     try:
-                        # Ziraat Bülten Standart Sütun Konumları
+                        # Ziraat Bülten PDF Sağdan Sola Sütun Dizilimi:
                         roa = sayi_donustur(parcalar[-8])
                         roe = sayi_donustur(parcalar[-7])
-                        fk = sayi_donustur(parcalar[-6])
+                        net_borc_favok = sayi_donustur(parcalar[-6])
                         pddd = sayi_donustur(parcalar[-5])
+                        fd_favok = sayi_donustur(parcalar[-4])
+                        pd_s = sayi_donustur(parcalar[-3])
+                        fk = sayi_donustur(parcalar[-2]) # DİKKAT: Eski kodunuzda -6 idi, düzeltildi.
                         
                         hisse_verileri.append({
                             "Hisse": kod,
@@ -112,7 +115,10 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                             "ROA": roa,
                             "ROE": roe,
                             "FK": fk,
-                            "PDDD": pddd
+                            "PDDD": pddd,
+                            "FD_FAVOK": fd_favok,
+                            "NetBorc_FAVOK": net_borc_favok,
+                            "PDS": pd_s
                         })
                     except:
                         pass
@@ -227,3 +233,19 @@ try:
     requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "Markdown"})
 except Exception as e:
     print(f"⚠️ Telegram gönderim hatası: {e}")
+
+# --- 9. POWER BI İÇİN ZENGİNLEŞTİRİLMİŞ CSV ÇIKTISI (GITHUB'A KAYIT) ---
+import csv
+
+csv_dosya = "ziraat_carpanlar.csv"
+# Yeni sütunlar CSV başlıklarına eklendi. Make.com listesine DOKUNULMADI.
+csv_basliklar = ["Hisse", "Sektor", "FK", "PDDD", "FD_FAVOK", "NetBorc_FAVOK", "PDS", "Prospektif_FK", "Durum"]
+
+try:
+    with open(csv_dosya, mode="w", encoding="utf-8-sig", newline="") as dosya:
+        yazici = csv.DictWriter(dosya, fieldnames=csv_basliklar, extrasaction='ignore')
+        yazici.writeheader()
+        yazici.writerows(guncellenecek_paketler)
+    print(f"💾 Power BI terminali için {csv_dosya} (zenginleştirilmiş veriyle) başarıyla oluşturuldu!")
+except Exception as e:
+    print(f"⚠️ CSV oluşturma hatası: {e}")
