@@ -149,9 +149,9 @@ for s, vals in sektor_havuzu.items():
 
 # --- 6. DEĞERLEME MOTORU ---
 piotroski_sozluk = {}
-if os.path.exists("master_bilanco_bist100.csv"):
+if os.path.exists("master_bilanco_bist_tum.csv"):
     import pandas as pd
-    df_m = pd.read_csv("master_bilanco_bist100.csv")
+    df_m = pd.read_csv("master_bilanco_bist_tum.csv")
     for _, r in df_m.iterrows():
         piotroski_sozluk[r["Hisse"]] = r["Piotroski_Skor"]
 
