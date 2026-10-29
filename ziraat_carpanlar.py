@@ -6,8 +6,13 @@ import json
 import requests
 import statistics
 import csv
+import urllib3
 from datetime import datetime, timedelta
 
+# SSL ve Güvenlik Uyarılarını Sustur
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# --- 1. KURULUM KONTROLÜ ---
 try:
     import pdfplumber
 except ImportError:
@@ -17,31 +22,37 @@ except ImportError:
 
 import pandas as pd
 
-# --- AYARLAR ---
+# --- 2. AYARLAR & ENTEGRASYONLAR ---
 MAKE_WEBHOOK_URL = "https://hook.eu1.make.com/wa77gag3g9hqdubo8tn401h7yssknf7c"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8897693829:AAEHKHoRKSN-h3RRRU60bDCq3wcuLstivI4")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "932085366")
 PDF_DOSYA_ADI = "bulten.pdf"
 MASTER_BILANCO_DOSYASI = "master_bilanco_bist_tum.csv"
 
+# --- 3. BÜLTENİ OTOMATİK İNDİRME MOTORU (GÜÇLENDİRİLMİŞ) ---
 def bulten_indir(hedef_dosya="bulten.pdf"):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Referer": "https://www.ziraatyatirim.com.tr/"
     }
     bugun = datetime.today()
-    for i in range(7):
+    # Tatil günlerini ve hafta sonlarını rahatça aşabilmesi için geriye dönük 10 gün tarama
+    for i in range(10):
         tarih = bugun - timedelta(days=i)
         tarih_str = tarih.strftime("%d%m%Y")
         url = f"https://www.ziraatyatirim.com.tr/documents/category/GG_{tarih_str}.pdf"
         try:
-            res = requests.get(url, headers=headers, timeout=15)
+            res = requests.get(url, headers=headers, timeout=30, verify=False)
             if res.status_code == 200 and len(res.content) > 5000:
                 with open(hedef_dosya, "wb") as f:
                     f.write(res.content)
-                print(f"🎯 Güncel bülten indirildi: GG_{tarih_str}.pdf")
+                print(f"🎯 Güncel bülten indirildi: GG_{tarih_str}.pdf ({len(res.content)} bayt)")
                 return True
-        except Exception:
+            else:
+                print(f"ℹ️ {tarih_str} denendi (Durum Kodu: {res.status_code})")
+        except Exception as e:
+            print(f"⚠️ {tarih_str} bağlantı denemesi: {e}")
             continue
     return False
 
@@ -51,7 +62,7 @@ def sayi_donustur(deger):
     try: return float(temiz)
     except: return 0.0
 
-# --- 1. PIOTROSKI SKORLARINI MASTER DOSYADAN OKU ---
+# --- 4. PIOTROSKI SKORLARINI MASTER DOSYADAN OKUMA ---
 piotroski_sozluk = {}
 if os.path.exists(MASTER_BILANCO_DOSYASI):
     try:
@@ -67,10 +78,10 @@ if os.path.exists(MASTER_BILANCO_DOSYASI):
     except Exception as e:
         print(f"⚠️ Master bilanço okuma hatası: {e}")
 
-# --- 2. ZİRAAT BÜLTENİ SEKTÖRLERİYLE KAZIMA MOTORU ---
+# --- 5. ZİRAAT BÜLTENİ SEKTÖRLERİYLE KAZIMA & PİKSEL MOTORU ---
 print("🚀 BİST TÜM Çarpan Motoru Başlatıldı...")
 if not bulten_indir(PDF_DOSYA_ADI):
-    raise FileNotFoundError("❌ Ziraat bülteni indirilemedi.")
+    raise FileNotFoundError("❌ Ziraat bülteni indirilemedi, işlem durduruldu.")
 
 ZIRAAT_SEKTORLER = [
     "GİRİŞİM SERMAYESİ YATIRIM ORTAKLIKLARI", "MESLEKİ, BİLİMSEL VE TEKNİK FAALİYETLER", 
@@ -110,6 +121,7 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             satir_upper = satir.upper().strip()
             satir_upper_temiz = metin_temizle(satir_upper)
 
+            # Pazar Filtreleri
             if any(p in satir_upper_temiz for p in ["YAKIN IZLEME", "ALT PAZAR", "PIYASA ONCESI"]):
                 aktif_pazar = "VETO"
                 continue
@@ -123,7 +135,7 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                 aktif_pazar = "YILDIZ_ANA"
                 continue
 
-            # Hisse Tespiti
+            # Hisse Kodu Tespiti
             kod = ""
             if len(parcalar) >= 10:
                 for p in parcalar:
@@ -144,10 +156,10 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                         "PDS": sayi_donustur(parcalar[-2 - offset]),
                         "NetBorc_FAVOK": sayi_donustur(parcalar[-1 - offset])
                     })
-                except:
+                except Exception:
                     pass
 
-# --- 3. DİNAMİK SEKTÖR MEDYANLARI ---
+# --- 6. DİNAMİK SEKTÖR MEDYANLARI (HESAPLANMIŞ MEDYAN) ---
 sektor_havuzu = {}
 for h in hisse_verileri:
     s = h["Sektor"]
@@ -169,7 +181,7 @@ for s, vals in sektor_havuzu.items():
         "m_nbf": statistics.median(vals["nbf"]) if vals["nbf"] else 2.0
     }
 
-# --- 4. DEĞERLEME & PROSPEKTİF F/K ---
+# --- 7. DEĞERLEME MOTORU & PROSPEKTİF F/K ---
 guncellenecek_paketler = []
 for h in hisse_verileri:
     sektor = h["Sektor"]
@@ -196,7 +208,7 @@ for h in hisse_verileri:
             h["Prospektif_FK"] = max(round(fk / (1.0 + g), 2), 0.5) if fk > 0 else 0.0
         else:
             h["Prospektif_FK"] = fk
-    except:
+    except Exception:
         h["Prospektif_FK"] = fk
 
     h["Sektor_FK"] = sec_fk
@@ -209,19 +221,22 @@ for h in hisse_verileri:
 
 guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
 
-# --- 5. CSV YAZMA ---
+# --- 8. POWER BI İÇİN CSV ÇIKTISI (GITHUB REPOSU) ---
 csv_dosya = "ziraat_carpanlar.csv"
-csv_basliklar = ["Hisse", "Sektor", "Halka_Aciklik", "FK", "PDDD", "FD_FAVOK", "PDS", "NetBorc_FAVOK", 
-                 "Prospektif_FK", "Durum", "Sektor_FK", "Sektor_PDDD", "Sektor_FDFAVOK", "Sektor_PDS", "Sektor_NBF"]
+csv_basliklar = [
+    "Hisse", "Sektor", "Halka_Aciklik", "FK", "PDDD", "FD_FAVOK", "PDS", "NetBorc_FAVOK", 
+    "Prospektif_FK", "Durum", "Sektor_FK", "Sektor_PDDD", "Sektor_FDFAVOK", "Sektor_PDS", "Sektor_NBF"
+]
 try:
     with open(csv_dosya, mode="w", encoding="utf-8-sig", newline="") as dosya:
         yazici = csv.DictWriter(dosya, fieldnames=csv_basliklar, extrasaction='ignore')
         yazici.writeheader()
         yazici.writerows(guncellenecek_paketler)
+    print(f"📁 {csv_dosya} dosyası başarıyla üretildi.")
 except Exception as e:
     print(f"⚠️ CSV hatası: {e}")
 
-# --- 6. EXCEL'E MAKE.COM AKTARIMI ---
+# --- 9. MAKE.COM WEBHOOK İLE EXCEL AKTARIMI ---
 matris_verisi = []
 for h in guncellenecek_paketler:
     matris_verisi.append([
@@ -237,11 +252,12 @@ payload = {
     "hazir_body_zb": json.dumps({"values": matris_verisi})
 }
 try:
-    requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-except Exception:
-    pass
+    res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+    print(f"🎉 15 Sütunluk Zengin Veri Excel'e Aktarıldı! (Durum Kodu: {res.status_code})")
+except Exception as e:
+    print(f"⚠️ Make.com hatası: {e}")
 
-# --- 7. TELEGRAM BİLDİRİMİ ---
+# --- 10. TELEGRAM RAPORU BİLDİRİMİ ---
 iskontolular = [x for x in guncellenecek_paketler if x["Durum"] == "🟢 İskontolu" and x["FK"] > 0]
 top_10 = sorted(iskontolular, key=lambda x: x["FK"])[:10]
 
@@ -249,7 +265,10 @@ mesaj = f"📊 *BİST TÜM DEĞERLEME RAPORU*\n🔎 Analiz Edilen: `{len(guncell
 for h in top_10:
     mesaj += f"• *{h['Hisse']}* ({h['Sektor']}): F/K: `{h['FK']}` | PD/DD: `{h['PDDD']}`\n"
 try:
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
-                  json={"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}, timeout=15)
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}, 
+        timeout=15
+    )
 except Exception:
     pass
