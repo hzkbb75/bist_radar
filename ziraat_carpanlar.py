@@ -1,5 +1,5 @@
 # ==============================================================================
-# HAFTALIK ZİRAAT BİST TÜM PİYASA ÇARPANLARI & SEKTÖREL MEDYAN MOTORU
+# HAFTALIK ZİRAAT & BİST ANALİTİK MOTORU (OKAN DNA + SERKAN ÜNAL SİSTEMİ)
 # ==============================================================================
 import os
 import json
@@ -9,7 +9,6 @@ import csv
 import urllib3
 from datetime import datetime, timedelta
 
-# SSL ve Güvenlik Uyarılarını Sustur
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- 1. KURULUM KONTROLÜ ---
@@ -30,7 +29,7 @@ PDF_DOSYA_ADI = "bulten.pdf"
 MASTER_BILANCO_DOSYASI = "master_bilanco_bist_tum.csv"
 JSON_SEKTOR_DOSYASI = "bist_sektorler.json"
 
-# --- 3. BÜLTENİ OTOMATİK İNDİRME MOTORU (GÜÇLENDİRİLMİŞ) ---
+# --- 3. BÜLTENİ OTOMATİK İNDİRME MOTORU ---
 def bulten_indir(hedef_dosya="bulten.pdf"):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -49,10 +48,7 @@ def bulten_indir(hedef_dosya="bulten.pdf"):
                     f.write(res.content)
                 print(f"🎯 Güncel bülten indirildi: GG_{tarih_str}.pdf ({len(res.content)} bayt)")
                 return True
-            else:
-                print(f"ℹ️ {tarih_str} denendi (Durum Kodu: {res.status_code})")
-        except Exception as e:
-            print(f"⚠️ {tarih_str} bağlantı denemesi: {e}")
+        except Exception:
             continue
     return False
 
@@ -62,19 +58,30 @@ def sayi_donustur(deger):
     try: return float(temiz)
     except: return 0.0
 
-# --- 4. PIOTROSKI SKORLARINI MASTER DOSYADAN OKUMA ---
-piotroski_sozluk = {}
+# --- 4. MASTER BİLANÇO DOSYASINI OKUMA ---
+bilanco_sozluk = {}
 if os.path.exists(MASTER_BILANCO_DOSYASI):
     try:
         df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=None, engine='python')
         df_m.columns = [str(c).strip().upper() for c in df_m.columns]
-        h_col = next((c for c in df_m.columns if "HISSE" in c), None)
-        p_col = next((c for c in df_m.columns if "PIOT" in c), None)
-        if h_col and p_col:
-            for _, r in df_m.iterrows():
-                if pd.notna(r[h_col]) and pd.notna(r[p_col]):
-                    piotroski_sozluk[str(r[h_col]).strip().upper()] = r[p_col]
-            print(f"✅ {len(piotroski_sozluk)} hisse için Piotroski skoru yüklendi.")
+        h_col = next((c for c in df_m.columns if "HISSE" in c), "HISSE")
+        
+        for _, r in df_m.iterrows():
+            kod = str(r[h_col]).strip().upper()
+            if kod and kod != "NAN":
+                bilanco_sozluk[kod] = {
+                    "PIOTROSKI": sayi_donustur(r.get("PIOTROSKI_SKOR", 0)),
+                    "ALTMAN_Z": sayi_donustur(r.get("ALTMAN_Z", 0)),
+                    "ROA": sayi_donustur(r.get("ROA", 0)),
+                    "BRUT_MARJ": sayi_donustur(r.get("BRUT_MARJ", 0)),
+                    "ROE": sayi_donustur(r.get("ROE", 0)),
+                    "NET_KAR_MARJI": sayi_donustur(r.get("NET_KAR_MARJI", 0)),
+                    "AKTIF_DEVIR": sayi_donustur(r.get("AKTIF_DEVIR", 0)),
+                    "KALDIRAC": sayi_donustur(r.get("KALDIRAC", 0)),
+                    "TEMEL_SKOR": sayi_donustur(r.get("TEMEL_SKOR", 0)),
+                    "ILISKILI_TARAF": str(r.get("ILISKILI_TARAF", "Temiz")).strip()
+                }
+        print(f"✅ {len(bilanco_sozluk)} hisse için master bilanço metrikleri yüklendi.")
     except Exception as e:
         print(f"⚠️ Master bilanço okuma hatası: {e}")
 
@@ -87,8 +94,6 @@ if os.path.exists(JSON_SEKTOR_DOSYASI):
         print(f"✅ {len(sektor_sozluk)} hisselik BİST sektör sözlüğü başarıyla yüklendi.")
     except Exception as e:
         print(f"⚠️ Sektör JSON dosyası okuma hatası: {e}")
-else:
-    print(f"⚠️ {JSON_SEKTOR_DOSYASI} bulunamadı!")
 
 # --- 6. KOORDİNAT BAZLI PDF KAZIMA MOTORU ---
 print("🚀 BİST TÜM Çarpan Motoru Başlatıldı...")
@@ -116,20 +121,16 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             satir_upper = satir.upper().strip()
             satir_upper_temiz = metin_temizle(satir_upper)
 
-            # Pazar Filtreleri
             if any(p in satir_upper_temiz for p in ["YAKIN IZLEME", "ALT PAZAR", "PIYASA ONCESI"]):
                 aktif_pazar = "VETO"
                 continue
 
             parcalar = satir.split()
-
-            # Pazar Başlığı Değişimi Kontrolü
             if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir):
                 if not any(p in satir_upper_temiz for p in ["YAKIN IZLEME", "ALT PAZAR", "PIYASA ONCESI"]):
                     aktif_pazar = "YILDIZ_ANA"
                 continue
 
-            # Hisse Kodu Tespiti
             kod = ""
             if len(parcalar) >= 10:
                 for p in parcalar:
@@ -140,8 +141,6 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
             if kod and aktif_pazar != "VETO":
                 try:
                     offset = 1 if parcalar[-1].isalpha() else 0
-                    
-                    # Sektörü JSON sözlüğünden al, yoksa "DİĞER" yap
                     sektor = sektor_sozluk.get(kod, "DİĞER")
                     
                     hisse_verileri.append({
@@ -157,7 +156,7 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                 except Exception:
                     pass
 
-# --- 7. DİNAMİK SEKTÖR MEDYANLARI (HESAPLANMIŞ MEDYAN) ---
+# --- 7. DİNAMİK SEKTÖR MEDYANLARI ---
 sektor_havuzu = {}
 for h in hisse_verileri:
     s = h["Sektor"]
@@ -179,68 +178,178 @@ for s, vals in sektor_havuzu.items():
         "m_nbf": statistics.median(vals["nbf"]) if vals["nbf"] else 2.0
     }
 
-# --- 8. DEĞERLEME MOTORU & PROSPEKTİF F/K ---
+# --- 8. OKAN DNA & SERKAN ÜNAL MATEMATİKSEL KARAR MOTORU ---
+FINANS_SEKTORLERI = ["BANKA", "SİGORTA", "FAKTORİNG", "LEASİNG", "ARACI KURUM & FİNANS", "YATIRIM ORTAKLIĞI", "GYO"]
 guncellenecek_paketler = []
+
 for h in hisse_verileri:
+    kod = h["Hisse"]
     sektor = h["Sektor"]
-    fk, pddd = h["FK"], h["PDDD"]
+    fk, pddd, nbf = h["FK"], h["PDDD"], h["NetBorc_FAVOK"]
     sec_fk = sektor_medyanlari[sektor]["m_fk"]
     sec_pddd = sektor_medyanlari[sektor]["m_pddd"]
+    
+    bil = bilanco_sozluk.get(kod, {
+        "PIOTROSKI": 5.0, "ALTMAN_Z": 2.5, "ROA": 0.05, "BRUT_MARJ": 0.20,
+        "ROE": 0.15, "NET_KAR_MARJI": 0.05, "AKTIF_DEVIR": 0.5, "KALDIRAC": 0.5,
+        "TEMEL_SKOR": 50.0, "ILISKILI_TARAF": "Temiz"
+    })
+    
+    # 1. SERKAN ÜNAL KIRMIZI ÇİZGİLER (VETO FİLTRESİ)
+    is_veto = False
+    veto_nedeni = "Yok"
+    
+    if "RİSKLİ" in bil["ILISKILI_TARAF"].upper() or "RISKLI" in bil["ILISKILI_TARAF"].upper():
+        is_veto = True
+        veto_nedeni = "İlişkili Taraf İşlemleri Güvensiz"
+    elif sektor not in FINANS_SEKTORLERI and bil["ALTMAN_Z"] > 0 and bil["ALTMAN_Z"] < 1.1:
+        is_veto = True
+        veto_nedeni = "Altman-Z İflas / Temerrüt Riski"
+    elif sektor not in FINANS_SEKTORLERI and nbf > 5.0:
+        is_veto = True
+        veto_nedeni = "Aşırı Kaldıraç (Net Borç/FAVÖK > 5)"
 
-    if "BANKA" in sektor or "GYO" in sektor or "GAYRİMENKUL" in sektor:
-        oran = (pddd / sec_pddd) if (pddd > 0 and sec_pddd > 0) else 1.0
+    # 2. OKAN DNA: SAĞLAMLIK SKORU (0 - 100)
+    # A) Borç Puanı (0 - 40)
+    if sektor in FINANS_SEKTORLERI:
+        p_borc = 35.0
+    else:
+        if nbf <= 0: p_borc = 40.0
+        else: p_borc = max(0.0, min(40.0, 40.0 - (nbf * 7.0)))
+    
+    # B) Piotroski Skor Gücü (0 - 35)
+    p_piot = min(35.0, (bil["PIOTROSKI"] / 9.0) * 35.0)
+    
+    # C) Altman Z Temel Güven (0 - 25)
+    if sektor in FINANS_SEKTORLERI:
+        p_altman = 20.0
+    else:
+        if bil["ALTMAN_Z"] >= 3.0: p_altman = 25.0
+        elif bil["ALTMAN_Z"] >= 1.8: p_altman = 15.0 + ((bil["ALTMAN_Z"] - 1.8) / 1.2) * 10.0
+        else: p_altman = max(0.0, (bil["ALTMAN_Z"] / 1.8) * 10.0)
+        
+    saglamlik_skor = round(p_borc + p_piot + p_altman, 1)
+
+    # 3. OKAN DNA: GİDİŞAT VE KÂRLILIK MOMENTUMU (0 - 100)
+    # A) ROE Verimliliği (0 - 40)
+    roe_val = max(0.0, bil["ROE"])
+    p_roe = min(40.0, (roe_val / 0.35) * 40.0)
+    
+    # B) Net Kâr Marjı (0 - 30)
+    nkm_val = max(0.0, bil["NET_KAR_MARJI"])
+    p_nkm = min(30.0, (nkm_val / 0.20) * 30.0)
+    
+    # C) Aktif Devir Hızı / Varlık Dönüşü (0 - 30)
+    ad_val = max(0.0, bil["AKTIF_DEVIR"])
+    p_ad = min(30.0, (ad_val / 1.2) * 30.0)
+    
+    gidisat_skor = round(p_roe + p_nkm + p_ad, 1)
+
+    # 4. DEĞERLEME & İSKONTO SKORU (0 - 100)
+    if sektor in FINANS_SEKTORLERI:
+        r_oran = (pddd / sec_pddd) if (pddd > 0 and sec_pddd > 0) else 1.0
     else:
         bilesenler = []
         if fk > 0 and sec_fk > 0: bilesenler.append(fk / sec_fk)
         if pddd > 0 and sec_pddd > 0: bilesenler.append(pddd / sec_pddd)
-        oran = (sum(bilesenler) / len(bilesenler)) if bilesenler else 1.0
+        r_oran = (sum(bilesenler) / len(bilesenler)) if bilesenler else 1.0
 
-    if oran <= 0.85: h["Durum"] = "🟢 İskontolu"
-    elif oran <= 1.15: h["Durum"] = "🟡 Dengeli"
-    else: h["Durum"] = "🔴 Pahalı"
+    if r_oran <= 0.65: degerleme_skor = 100.0
+    elif r_oran <= 0.85: degerleme_skor = 85.0
+    elif r_oran <= 1.00: degerleme_skor = 65.0
+    elif r_oran <= 1.20: degerleme_skor = 40.0
+    elif r_oran <= 1.40: degerleme_skor = 20.0
+    else: degerleme_skor = 5.0
 
-    f_skor = piotroski_sozluk.get(h["Hisse"], None)
-    try:
-        if f_skor is not None:
-            g = (float(f_skor) - 4.5) * 0.06
-            h["Prospektif_FK"] = max(round(fk / (1.0 + g), 2), 0.5) if fk > 0 else 0.0
+    # 5. NİHAİ OSE SKORU & SERKAN ÜNAL PORTFÖY PAYI
+    ham_ose = (0.30 * saglamlik_skor) + (0.35 * gidisat_skor) + (0.35 * degerleme_skor)
+    
+    if is_veto:
+        ose_skor = round(min(ham_ose, 35.0), 1)
+        durum = "🔴 Pahalı"
+        veto_durum = "⛔ VETO"
+        portfoy_statusu = "⛔ Yasaklı / Veto"
+        max_agirlik = 0.0
+    else:
+        ose_skor = round(ham_ose, 1)
+        veto_durum = "✅ GEÇTİ"
+        if r_oran <= 0.85: durum = "🟢 İskontolu"
+        elif r_oran <= 1.15: durum = "🟡 Dengeli"
+        else: durum = "🔴 Pahalı"
+
+        if ose_skor >= 80:
+            portfoy_statusu = "🏆 Çekirdek / Hendekli"
+            max_agirlik = 10.0
+        elif ose_skor >= 65:
+            portfoy_statusu = "🛡️ Korunaklı Büyüme"
+            max_agirlik = 6.0
+        elif ose_skor >= 50:
+            portfoy_statusu = "⚖️ Fırsat / Döngüsel"
+            max_agirlik = 3.0
         else:
-            h["Prospektif_FK"] = fk
-    except Exception:
-        h["Prospektif_FK"] = fk
+            portfoy_statusu = "👀 Takip / Zayıf"
+            max_agirlik = 1.0
 
-    h["Sektor_FK"] = sec_fk
-    h["Sektor_PDDD"] = sec_pddd
-    h["Sektor_FDFAVOK"] = sektor_medyanlari[sektor]["m_fd_favok"]
-    h["Sektor_PDS"] = sektor_medyanlari[sektor]["m_pds"]
-    h["Sektor_NBF"] = sektor_medyanlari[sektor]["m_nbf"]
+    # Serkan Hoca Prospektif F/K
+    f_skor = bil["PIOTROSKI"]
+    g = (float(f_skor) - 4.5) * 0.06
+    prospektif_fk = max(round(fk / (1.0 + g), 2), 0.5) if fk > 0 else 0.0
 
+    # Pakete ekle
+    h.update({
+        "Durum": durum,
+        "Veto_Durum": veto_durum,
+        "Veto_Nedeni": veto_nedeni,
+        "Saglamlik_Skor": saglamlik_skor,
+        "Gidisat_Skor": gidisat_skor,
+        "Degerleme_Skor": degerleme_skor,
+        "OSE_Skor": ose_skor,
+        "Portfoy_Statusu": portfoy_statusu,
+        "Max_Agirlik": max_agirlik,
+        "Prospektif_FK": prospektif_fk,
+        "Sektor_FK": sec_fk,
+        "Sektor_PDDD": sec_pddd,
+        "Sektor_FDFAVOK": sektor_medyanlari[sektor]["m_fd_favok"],
+        "Piotroski_Skor": bil["PIOTROSKI"],
+        "Altman_Z": bil["ALTMAN_Z"],
+        "ROE": bil["ROE"],
+        "Net_Kar_Marji": bil["NET_KAR_MARJI"],
+        "Aktif_Devir": bil["AKTIF_DEVIR"],
+        "Kaldirac": bil["KALDIRAC"],
+        "Temel_Skor": bil["TEMEL_SKOR"],
+        "Iliskili_Taraf": bil["ILISKILI_TARAF"]
+    })
     guncellenecek_paketler.append(h)
 
-guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
+guncellenecek_paketler.sort(key=lambda x: x["OSE_Skor"], reverse=True)
 
 # --- 9. POWER BI İÇİN CSV ÇIKTISI (GITHUB REPOSU) ---
 csv_dosya = "ziraat_carpanlar.csv"
 csv_basliklar = [
-    "Hisse", "Sektor", "Halka_Aciklik", "FK", "PDDD", "FD_FAVOK", "PDS", "NetBorc_FAVOK", 
-    "Prospektif_FK", "Durum", "Sektor_FK", "Sektor_PDDD", "Sektor_FDFAVOK", "Sektor_PDS", "Sektor_NBF"
+    "Hisse", "Sektor", "Durum", "Veto_Durum", "Veto_Nedeni",
+    "OSE_Skor", "Saglamlik_Skor", "Gidisat_Skor", "Degerleme_Skor",
+    "Portfoy_Statusu", "Max_Agirlik",
+    "FK", "Prospektif_FK", "PDDD", "FD_FAVOK", "PDS", "NetBorc_FAVOK", "Halka_Aciklik",
+    "Sektor_FK", "Sektor_PDDD", "Sektor_FDFAVOK",
+    "Piotroski_Skor", "Altman_Z", "ROE", "Net_Kar_Marji", "Aktif_Devir", "Kaldirac", "Temel_Skor", "Iliskili_Taraf"
 ]
+
 try:
     with open(csv_dosya, mode="w", encoding="utf-8-sig", newline="") as dosya:
         yazici = csv.DictWriter(dosya, fieldnames=csv_basliklar, extrasaction='ignore')
         yazici.writeheader()
         yazici.writerows(guncellenecek_paketler)
-    print(f"📁 {csv_dosya} dosyası başarıyla üretildi.")
+    print(f"📁 {csv_dosya} dosyası başarıyla üretildi ({len(guncellenecek_paketler)} hisse).")
 except Exception as e:
     print(f"⚠️ CSV hatası: {e}")
 
 # --- 10. MAKE.COM WEBHOOK İLE EXCEL AKTARIMI ---
 matris_verisi = []
-for h in guncellenecek_paketler:
+for h in sorted(guncellenecek_paketler, key=lambda x: x["Hisse"]):
     matris_verisi.append([
         h["Hisse"], h["Sektor"], h["Halka_Aciklik"], h["FK"], h["PDDD"], 
         h["FD_FAVOK"], h["PDS"], h["NetBorc_FAVOK"], h["Prospektif_FK"], h["Durum"],
-        h["Sektor_FK"], h["Sektor_PDDD"], h["Sektor_FDFAVOK"], h["Sektor_PDS"], h["Sektor_NBF"]
+        h["Sektor_FK"], h["Sektor_PDDD"], h["Sektor_FDFAVOK"], h["OSE_Skor"], h["Portfoy_Statusu"]
     ])
 
 dinamik_aralik = f"A2:O{len(matris_verisi) + 1}"
@@ -250,18 +359,20 @@ payload = {
     "hazir_body_zb": json.dumps({"values": matris_verisi})
 }
 try:
-    res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-    print(f"🎉 15 Sütunluk Zengin Veri Excel'e Aktarıldı! (Durum Kodu: {res.status_code})")
-except Exception as e:
-    print(f"⚠️ Make.com hatası: {e}")
+    requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+except Exception:
+    pass
 
 # --- 11. TELEGRAM RAPORU BİLDİRİMİ ---
-iskontolular = [x for x in guncellenecek_paketler if x["Durum"] == "🟢 İskontolu" and x["FK"] > 0]
-top_10 = sorted(iskontolular, key=lambda x: x["FK"])[:10]
+gecenler = [x for x in guncellenecek_paketler if x["Veto_Durum"] == "✅ GEÇTİ"]
+top_5 = gecenler[:5]
 
-mesaj = f"📊 *BİST TÜM DEĞERLEME RAPORU*\n🔎 Analiz Edilen: `{len(guncellenecek_paketler)}` Hisse\n\n🏆 *Top 10 İskonto:*\n"
-for h in top_10:
-    mesaj += f"• *{h['Hisse']}* ({h['Sektor']}): F/K: `{h['FK']}` | PD/DD: `{h['PDDD']}`\n"
+mesaj = f"🧠 *OKAN & SERKAN ANALİTİK MOTORU RAPORU*\n"
+mesaj += f"📊 Toplam Taranan: `{len(guncellenecek_paketler)}` | Onaylanan: `{len(gecenler)}` Hisse\n\n"
+mesaj += f"🏆 *Lider Çekirdek Hisseler (Top 5 OSE Skoru):*\n"
+for h in top_5:
+    mesaj += f"• *{h['Hisse']}* ({h['Sektor']}): OSE: `{h['OSE_Skor']}` | Durum: `{h['Durum']}` | Portföy Payı: `%{h['Max_Agirlik']}`\n"
+
 try:
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
