@@ -188,27 +188,21 @@ print(f"✅ Filtreden Geçen ve Temizlenen Hisse Sayısı: {len(guncellenecek_pa
 with open("bist_hisseleri.json", "w", encoding="utf-8") as f:
     json.dump([h["Hisse"] for h in guncellenecek_paketler], f)
 
-# --- 7. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM (GÜNCELLENDİ) ---
+# --- 7. MAKE.COM WEBHOOK İLE EXCEL'E AKTARIM (GÜVENLİ VERSİYON) ---
 guncellenecek_paketler.sort(key=lambda x: x["Hisse"])
 
 matris_verisi = []
 for h in guncellenecek_paketler:
-    # Power BI'a giden verinin BİREBİR AYNISI Excel (Make.com) ham veri sayfasına gidiyor (9 Sütun)
+    # Excel'deki "Ham Veri" yapınızın BOZULMAMASI için sadece 4 sütun gönderiyoruz.
     matris_verisi.append([
         h["Hisse"],           # A Sütunu
-        h["Sektor"],          # B Sütunu
-        h["FK"],              # C Sütunu
-        h["PDDD"],            # D Sütunu
-        h["FD_FAVOK"],        # E Sütunu
-        h["NetBorc_FAVOK"],   # F Sütunu
-        h["PDS"],             # G Sütunu
-        h["Prospektif_FK"],   # H Sütunu
-        h["Durum"]            # I Sütunu
+        h["FK"],              # B Sütunu
+        h["PDDD"],            # C Sütunu
+        h["Durum"]            # D Sütunu
     ])
 
-# Dinamik aralık artık A'dan I'ya (9 Sütun) genişletildi
 bitis_satiri = len(matris_verisi) + 1
-dinamik_aralik = f"A2:I{bitis_satiri}"
+dinamik_aralik = f"A2:D{bitis_satiri}"
 
 payload = {
     "islem_turu": "Haftalik_Carpan_Guncelleme",
@@ -220,7 +214,7 @@ payload = {
 
 res = requests.post(MAKE_WEBHOOK_URL, json=payload, headers={"Content-Type": "application/json"})
 if res.status_code == 200:
-    print(f"🎉 BİST TÜM Zengin Çarpanları ({dinamik_aralik} aralığına) Make.com üzerinden Excel'e aktarıldı!")
+    print(f"🎉 BİST TÜM Çarpanları ({dinamik_aralik} aralığına) Excel'e güvenle aktarıldı!")
 else:
     print(f"⚠️ Make.com Yanıt Kodu: {res.status_code}")
 
