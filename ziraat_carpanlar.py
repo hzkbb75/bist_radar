@@ -58,21 +58,32 @@ sektor_sozluk = {}
 piotroski_sozluk = {}
 
 if os.path.exists(MASTER_BILANCO_DOSYASI):
-    df_m = pd.read_csv(MASTER_BILANCO_DOSYASI)
-    # Sektör sütun adı tespiti (Sektor veya Sektör)
-    sektor_kolonu = "Sektör" if "Sektör" in df_m.columns else ("Sektor" if "Sektor" in df_m.columns else None)
-    piotroski_kolonu = "Piotroski_Skor" if "Piotroski_Skor" in df_m.columns else ("Piotroski" if "Piotroski" in df_m.columns else None)
+    try:
+        # Otomatik ayırıcı algılama (noktalı virgül ; veya virgül , fark etmez)
+        df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=None, engine='python', encoding='utf-8-sig')
+    except Exception:
+        df_m = pd.read_csv(MASTER_BILANCO_DOSYASI, sep=';', encoding='latin1')
+
+    # Kolon isimlerindeki boşlukları temizle
+    df_m.columns = [c.strip() for c in df_m.columns]
     
-    for _, r in df_m.iterrows():
-        kod = str(r.get("Hisse", "")).strip().upper()
-        if kod:
-            if sektor_kolonu and pd.notna(r[sektor_kolonu]):
+    # Sektör ve Hisse kolonlarını bul
+    sektor_kolonu = next((c for c in df_m.columns if "SEKT" in c.upper()), None)
+    hisse_kolonu = next((c for c in df_m.columns if "HISSE" in c.upper()), None)
+    piotroski_kolonu = next((c for c in df_m.columns if "PIOT" in c.upper()), None)
+    
+    if hisse_kolonu and sektor_kolonu:
+        for _, r in df_m.iterrows():
+            kod = str(r[hisse_kolonu]).strip().upper()
+            if kod and pd.notna(r[sektor_kolonu]):
                 sektor_sozluk[kod] = str(r[sektor_kolonu]).strip().upper()
             if piotroski_kolonu and pd.notna(r[piotroski_kolonu]):
                 piotroski_sozluk[kod] = r[piotroski_kolonu]
-    print(f"✅ Master CSV yüklendi: {len(sektor_sozluk)} hisse sektörü ve skoru eşleştirildi.")
+        print(f"✅ Sektörler başarıyla bağlandı! Toplam eşleşen hisse: {len(sektor_sozluk)}")
+    else:
+        print("⚠️ CSV okundu ancak 'Hisse' veya 'Sektör' sütun başlığı bulunamadı.")
 else:
-    print(f"⚠️ {MASTER_BILANCO_DOSYASI} bulunamadı!")
+    print(f"⚠️ {MASTER_BILANCO_DOSYASI} dosyası Python'ın çalıştığı klasörde bulunamadı!")
 
 # --- 5. KOORDİNAT BAZLI (PİKSEL) PARÇALAMA & VETO MOTORU ---
 print("🚀 BİST TÜM PDF Çarpan Çekme Motoru Başlatıldı...")
