@@ -83,7 +83,10 @@ with pdfplumber.open(PDF_DOSYA_ADI) as pdf:
                 continue
 
             parcalar = satir.split()
-            if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir):
+            # YENİ EKLENEN FİLTRE: Gerçek harf sayısını sayarak ✓, ↑, ↓ gibi işaretleri çöpe atar
+            harf_sayisi = sum(1 for c in satir_upper if c.isalpha())
+            
+            if 0 < len(parcalar) <= 4 and not any(c.isdigit() for c in satir) and harf_sayisi > 2:
                 if satir_upper not in ["BİST-TÜM", "BİST-100", "BİST-30", "NOTLAR"]:
                     aktif_sektor = satir_upper
                     aktif_pazar = "YILDIZ_ANA" # Sektör değiştiğinde veto sıfırlanır
