@@ -19,7 +19,7 @@ ONEDRIVE_EXCEL_URL = (
 )
 
 # OSE motorunun ürettiği güncel veri tablosu ve durum dosyaları
-OSE_CSV_PATH = "Ziraat_Carpanlar.csv"   # veya GitHub deponuzdaki tam yolu
+OSE_CSV_PATH = "ziraat_carpanlar.csv"   # veya GitHub deponuzdaki tam yolu
 KAP_CSV_OUTPUT = "kap_haberler.csv"
 STATE_FILE = "son_bildirimler.json"
 
