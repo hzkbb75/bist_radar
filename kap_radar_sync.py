@@ -260,10 +260,14 @@ def main():
                     seen_ids.add(bildirim_id)
 
     # 2. Power BI için CSV Kaydetme
+    # 2. Power BI için CSV Kaydetme (Haber olmasa bile dosya boş şablonla oluşsun)
     if pbi_haber_listesi:
         df_pbi = pd.DataFrame(pbi_haber_listesi).drop_duplicates(subset=["Hisse", "Baslik"])
-        df_pbi.to_csv(KAP_CSV_OUTPUT, index=False, encoding="utf-8-sig")
-        print(f"[Power BI] {len(df_pbi)} adet haber '{KAP_CSV_OUTPUT}' dosyasına yazıldı.")
+    else:
+        df_pbi = pd.DataFrame(columns=["Hisse", "Tarih", "Baslik", "Ozet", "KAP_Linki"])
+
+    df_pbi.to_csv(KAP_CSV_OUTPUT, index=False, encoding="utf-8-sig")
+    print(f"[Power BI] {len(df_pbi)} adet haber '{KAP_CSV_OUTPUT}' dosyasına yazıldı.")
 
     save_seen_ids(seen_ids)
     print(f"Tarama bitti. {yeni_bildirim_sayisi} yeni bildirim Telegram'a fırlatıldı.")
