@@ -24,8 +24,10 @@ jobs:
           pip install requests pandas openpyxl
 
       - name: KAP Radar Kodunu Çalıştır
-        run: |
-          python kap_radar_sync.py
+        env:
+          ONEDRIVE_SHARE_LINK: ${{ secrets.ONEDRIVE_SHARE_LINK }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python kap_radar_sync.py
 
       - name: Üretilen kap_haberler.csv Dosyasını Depoya Kaydet
         run: |
