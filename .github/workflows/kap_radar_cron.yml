@@ -31,6 +31,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add kap_haberler.csv son_bildirimler.json
+          git add -A
           git commit -m "auto: KAP haberleri güncellendi [skip ci]" || echo "Değişiklik yok"
           git push
