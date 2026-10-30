@@ -18,8 +18,7 @@ ONEDRIVE_EXCEL_URL = (
     or "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
 )
 
-# OSE motorunun ürettiği güncel veri tablosu ve durum dosyaları
-OSE_CSV_PATH = "ziraat_carpanlar.csv"   # veya GitHub deponuzdaki tam yolu
+OSE_CSV_PATH = "ziraat_carpanlar.csv"
 KAP_CSV_OUTPUT = "kap_haberler.csv"
 STATE_FILE = "son_bildirimler.json"
 
@@ -38,7 +37,7 @@ FILTRE_KELIMELER = [
     "temettü",
     "geri alım",
     "pay alım satım",
-    "özel durum açıklaması (genel)",
+    "özel durum açıklaması",
     "yatırım",
     "birleşme",
     "devralma"
@@ -90,22 +89,16 @@ def get_open_positions():
         print(f"OneDrive okuma hatası: {e}")
         return set()
 
-def get_top_ose_stocks(limit=15):
-    """OSE Motorundan çıkan 'Çekirdek' hisseleri izleme listesine ekler."""
+def get_all_bist_stocks():
+    """Ziraat çarpanlar dosyasından tüm BIST hisselerini alır."""
     if not os.path.exists(OSE_CSV_PATH):
         return set()
     try:
         df = pd.read_csv(OSE_CSV_PATH)
-        # Veto yememiş ve Portfoy_Statusu Çekirdek olanlar veya en yüksek OSE skoru alanlar
-        mask = (df["Veto_Durum"].astype(str).str.contains("GEÇTİ|GECTI", case=False, na=False))
-        df_filtered = df[mask]
-        
-        if "OSE_Skor" in df_filtered.columns:
-            df_sorted = df_filtered.sort_values(by="OSE_Skor", ascending=False)
-            top_stocks = set(df_sorted["Hisse"].dropna().head(limit).astype(str).str.strip().str.upper())
-            return top_stocks
+        if "Hisse" in df.columns:
+            return set(df["Hisse"].dropna().astype(str).str.strip().str.upper())
     except Exception as e:
-        print(f"OSE CSV okuma hatası: {e}")
+        print(f"Hisse listesi okuma hatası: {e}")
     return set()
 
 def load_seen_ids():
@@ -121,67 +114,66 @@ def save_seen_ids(seen_ids):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen_ids)[-1000:], f, ensure_ascii=False, indent=2)
 
-def fetch_from_bigpara(session, hisse):
-    url = f"https://bigpara.hurriyet.com.tr/api/v1/hisse/kaphaberleri/{hisse}"
+def fetch_kap_general_feed(session):
+    """Doğrudan KAP'ın son bildirim akışını çeker (Engellenmeyen genel akış)."""
+    url = "https://www.kap.org.tr/tr/api/disclosures"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://bigpara.hurriyet.com.tr/"
+        "Referer": "https://www.kap.org.tr/",
+        "Accept": "application/json, text/plain, */*"
     }
-    res = session.get(url, headers=headers, timeout=12)
-    if res.status_code == 200:
-        data = res.json()
-        raw_list = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        sonuclar = []
-        for d in raw_list:
-            b_id = str(d.get("id") or d.get("disclosureIndex") or "")
-            if not b_id:
-                continue
-            sonuclar.append({
-                "id": b_id,
-                "symbol": hisse,
-                "title": d.get("title") or d.get("baslik") or "KAP Bildirimi",
-                "date": d.get("date") or d.get("tarih") or datetime.now().strftime("%d.%m.%Y %H:%M"),
-                "summary": d.get("spot") or d.get("ozet") or d.get("title") or "",
-                "link": d.get("url") or f"https://www.kap.org.tr/tr/Bildirim/{b_id}"
-            })
-        return sonuclar
+    try:
+        res = session.post(url, headers=headers, json={}, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            sonuclar = []
+            for item in data:
+                b_id = str(item.get("disclosureIndex") or "")
+                stock_codes = item.get("stockCodes") or []
+                if not stock_codes and item.get("basic", {}).get("stockCode"):
+                    stock_codes = [item["basic"]["stockCode"]]
+                
+                title = item.get("title") or item.get("disclosureType") or "KAP Bildirimi"
+                summary = item.get("summary") or title
+                date_str = item.get("publishDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
+
+                for code in stock_codes:
+                    if code:
+                        sonuclar.append({
+                            "id": b_id,
+                            "symbol": code.strip().upper(),
+                            "title": title,
+                            "date": date_str,
+                            "summary": summary,
+                            "link": f"https://www.kap.org.tr/tr/Bildirim/{b_id}"
+                        })
+            return sonuclar
+    except Exception as e:
+        print(f"Genel KAP akışı çekme hatası: {e}")
     return []
 
 def fetch_from_tradingview(session, hisse):
-    url = f"https://news-headlines.tradingview.com/v2/headlines?lang=tr&symbol=BIST%3A{hisse}"
+    url = f"https://news-headlines.tradingview.com/v2/headlines?client=web&lang=tr&symbol=BIST%3A{hisse}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36"}
-    res = session.get(url, headers=headers, timeout=12)
-    if res.status_code == 200:
-        data = res.json()
-        items = data.get("items", []) if isinstance(data, dict) else []
-        sonuclar = []
-        for it in items:
-            b_id = str(it.get("id") or "")
-            pub_ts = it.get("published")
-            pub_str = datetime.fromtimestamp(pub_ts).strftime("%d.%m.%Y %H:%M") if pub_ts else datetime.now().strftime("%d.%m.%Y %H:%M")
-            link = it.get("link") or (f"https://www.tradingview.com{it.get('storyPath')}" if it.get("storyPath") else "")
-            sonuclar.append({
-                "id": b_id,
-                "symbol": hisse,
-                "title": it.get("title") or "KAP Bildirimi",
-                "date": pub_str,
-                "summary": it.get("shortDescription") or it.get("title") or "",
-                "link": link
-            })
-        return sonuclar
-    return []
-
-def fetch_company_disclosures(session, hisse):
     try:
-        veriler = fetch_from_bigpara(session, hisse)
-        if veriler:
-            return veriler
-    except Exception:
-        pass
-    try:
-        veriler = fetch_from_tradingview(session, hisse)
-        if veriler:
-            return veriler
+        res = session.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            items = res.json().get("items", [])
+            sonuclar = []
+            for it in items:
+                b_id = str(it.get("id") or "")
+                pub_ts = it.get("published")
+                pub_str = datetime.fromtimestamp(pub_ts).strftime("%d.%m.%Y %H:%M") if pub_ts else datetime.now().strftime("%d.%m.%Y %H:%M")
+                link = it.get("link") or (f"https://www.tradingview.com{it.get('storyPath')}" if it.get("storyPath") else "")
+                sonuclar.append({
+                    "id": b_id,
+                    "symbol": hisse,
+                    "title": it.get("title") or "KAP Bildirimi",
+                    "date": pub_str,
+                    "summary": it.get("shortDescription") or it.get("title") or "",
+                    "link": link
+                })
+            return sonuclar
     except Exception:
         pass
     return []
@@ -190,79 +182,86 @@ def send_to_make(payload):
     if not MAKE_WEBHOOK_URL:
         return False
     try:
-        res = requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=15)
+        res = requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=12)
         return res.status_code == 200
     except Exception:
         return False
 
 def filtreye_uyuyor_mu(baslik, ozet):
-    if not FILTRE_KELIMELER:
-        return True
     birlesik = f"{baslik} {ozet}".lower()
     return any(k in birlesik for k in FILTRE_KELIMELER)
 
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Birleşik KAP Taraması Başlatıldı.")
 
-    # 1. Takip Listesi Oluşturma (Açık Pozisyonlar + OSE Liderleri)
     acik_hisseler = get_open_positions()
-    ose_liderleri = get_top_ose_stocks(limit=15)
-    tum_takip = acik_hisseler.union(ose_liderleri)
-
-    if not tum_takip:
-        print("Takip edilecek hisse bulunamadı.")
-        return
-
-    print(f"Toplam Takip Edilen Hisse Sayısı: {len(tum_takip)}")
-    print(f"Hisseler: {', '.join(sorted(tum_takip))}")
-
+    tum_bist = get_all_bist_stocks()
     seen_ids = load_seen_ids()
     session = requests.Session()
-    yeni_bildirim_sayisi = 0
-    
-    # Power BI için toplanan tüm geçerli haber havuzu
-    pbi_haber_listesi = []
 
-    for hisse in tum_takip:
-        bildirimler = fetch_company_disclosures(session, hisse)
-        for item in bildirimler:
-            bildirim_id = str(item.get("id") or "")
-            sembol = str(item.get("symbol") or hisse).strip().upper()
-            baslik = item.get("title") or "KAP Bildirimi"
-            zaman = item.get("date") or datetime.now().strftime("%d.%m.%Y %H:%M")
-            ozet = str(item.get("summary") or baslik).strip()
-            link = item.get("link") or f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}"
+    # Mevcut birikmiş haberleri korumak için eski dosyayı oku (varsa)
+    pbi_haberler = []
+    if os.path.exists(KAP_CSV_OUTPUT):
+        try:
+            df_old = pd.read_csv(KAP_CSV_OUTPUT)
+            pbi_haberler = df_old.to_dict("records")
+        except Exception:
+            pbi_haberler = []
 
-            if filtreye_uyuyor_mu(baslik, ozet):
-                # Power BI tablosuna her zaman ekle (tarihsel arşiv)
-                pbi_haber_listesi.append({
-                    "Hisse": sembol,
-                    "Tarih": zaman,
-                    "Baslik": baslik,
-                    "Ozet": ozet,
-                    "KAP_Linki": link
-                })
+    # 1. Genel KAP Akışını Çek (Tüm BIST bildirimleri tek hamlede gelir)
+    print("Genel KAP son bildirimleri taranıyor...")
+    genel_bildirimler = fetch_kap_general_feed(session)
+    print(f"KAP'tan toplam {len(genel_bildirimler)} bildirim çekildi.")
 
-                # Yeni ise Make.com / Telegram'a ilet
-                if bildirim_id and bildirim_id not in seen_ids:
-                    payload = {
-                        "sembol": sembol,
-                        "baslik": baslik,
-                        "zaman": zaman,
-                        "kap_link": link,
-                        "ozet": ozet
-                    }
-                    if send_to_make(payload):
-                        seen_ids.add(bildirim_id)
-                        yeni_bildirim_sayisi += 1
-            else:
-                if bildirim_id:
-                    seen_ids.add(bildirim_id)
+    yeni_telegram_sayisi = 0
 
-    # 2. Power BI için CSV Kaydetme
-    # 2. Power BI için CSV Kaydetme (Haber olmasa bile dosya boş şablonla oluşsun)
-    if pbi_haber_listesi:
-        df_pbi = pd.DataFrame(pbi_haber_listesi).drop_duplicates(subset=["Hisse", "Baslik"])
+    for item in genel_bildirimler:
+        b_id = item["id"]
+        sembol = item["symbol"]
+        baslik = item["title"]
+        zaman = item["date"]
+        ozet = item["summary"]
+        link = item["link"]
+
+        # Power BI tablosuna ekle
+        pbi_haberler.append({
+            "Hisse": sembol,
+            "Tarih": zaman,
+            "Baslik": baslik,
+            "Ozet": ozet,
+            "KAP_Linki": link
+        })
+
+        # Telegram Filtresi: Sadece portföydekiler veya kritik anahtar kelime eşleşenler
+        if b_id and b_id not in seen_ids:
+            if sembol in acik_hisseler or filtreye_uyuyor_mu(baslik, ozet):
+                payload = {
+                    "sembol": sembol,
+                    "baslik": baslik,
+                    "zaman": zaman,
+                    "kap_link": link,
+                    "ozet": ozet
+                }
+                if send_to_make(payload):
+                    yeni_telegram_sayisi += 1
+            seen_ids.add(b_id)
+
+    # 2. Portföydeki Açık Hisselerin TradingView Geçmişini Ekle
+    for hisse in acik_hisseler:
+        tv_haberler = fetch_from_tradingview(session, hisse)
+        for th in tv_haberler:
+            pbi_haberler.append({
+                "Hisse": th["symbol"],
+                "Tarih": th["date"],
+                "Baslik": th["title"],
+                "Ozet": th["summary"],
+                "KAP_Linki": th["link"]
+            })
+
+    # 3. CSV Dosyasını Kaydet (Tekrarları temizleyerek en güncel 500 haberi saklar)
+    if pbi_haberler:
+        df_pbi = pd.DataFrame(pbi_haberler).drop_duplicates(subset=["Hisse", "Baslik"])
+        df_pbi = df_pbi.tail(500)
     else:
         df_pbi = pd.DataFrame(columns=["Hisse", "Tarih", "Baslik", "Ozet", "KAP_Linki"])
 
@@ -270,7 +269,7 @@ def main():
     print(f"[Power BI] {len(df_pbi)} adet haber '{KAP_CSV_OUTPUT}' dosyasına yazıldı.")
 
     save_seen_ids(seen_ids)
-    print(f"Tarama bitti. {yeni_bildirim_sayisi} yeni bildirim Telegram'a fırlatıldı.")
+    print(f"Tarama bitti. {yeni_telegram_sayisi} kritik bildirim Telegram'a fırlatıldı.")
 
 if __name__ == "__main__":
     main()
