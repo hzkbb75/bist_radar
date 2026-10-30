@@ -1,20 +1,16 @@
 import os
-import json
 import io
 import time
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==========================================
-# AYARLAR VE ÇEVRE DEĞİŞKENLERİ
+# AYARLAR (POWER BI HAFIZALI MOTOR)
 # ==========================================
-MAKE_WEBHOOK_URL = (
-    os.getenv("MAKE_WEBHOOK_URL") 
-    or "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
-)
 ONEDRIVE_EXCEL_URL = (
     os.getenv("ONEDRIVE_EXCEL_URL") 
     or "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
@@ -22,28 +18,68 @@ ONEDRIVE_EXCEL_URL = (
 
 OSE_CSV_PATH = "ziraat_carpanlar.csv"
 KAP_CSV_OUTPUT = "kap_haberler.csv"
-STATE_FILE = "son_bildirimler.json"
 
+# Arşivde ve taramada tutulacak gün penceresi (Son 10 gün)
+GUN_LIMITI = 10
+
+# Şirket Değerini ve Riskini Etkileyen Seçili Kritik Kategoriler
 FILTRE_KELIMELER = [
+    # 1. Ticari Operasyonlar & Siparişler
     "yeni iş ilişkisi",
     "sözleşme",
     "ihale",
     "sipariş",
+    "üretim başlangıcı",
+    "seri üretim",
+    
+    # 2. Yatırım, Büyüme & Teşvikler
+    "yatırım",
+    "yatırım teşvik",
+    "teşvik belgesi",
+    "kapasite artır",
+    "yeni tesis",
+    "ruhsat",
+    "lisans",
+    
+    # 3. Finansal Tablolar & Denetim
     "finansal rapor",
     "faaliyet raporu",
     "sorumluluk beyanı",
+    "kredi derecelendirme",
+    "derecelendirme notu",
+    
+    # 4. Sermaye, Temettü & Şirket Aksiyonları
     "sermaye artırımı",
     "bedelli",
     "bedelsiz",
+    "tahsisli",
     "kâr payı",
     "temettü",
     "geri alım",
     "pay alım satım",
-    "özel durum açıklaması",
-    "yatırım",
     "birleşme",
     "devralma",
-    "kap"
+    "şirket kuruluşu",
+    "bağlı ortaklık",
+    
+    # 5. SPK & Borsa Tedbirleri
+    "vbts",
+    "brüt takas",
+    "tedbir",
+    
+    # 6. Genel Özel Durum Açıklamaları
+    "özel durum açıklaması"
+]
+
+# Aracı kurum bültenleri, piyasa anketleri ve hedef fiyat yorumları
+KARA_LISTE = [
+    "bülteni",
+    "anketi",
+    "hedef fiyat",
+    "model portföy",
+    "öneri listesi",
+    "hisse analizi",
+    "beklentileri"
 ]
 
 def download_excel_file(url):
@@ -91,7 +127,7 @@ def get_open_positions():
         print(f"OneDrive okuma hatası: {e}")
         return set()
 
-def get_radar_candidates(limit=35):
+def get_radar_candidates(limit=150):
     if not os.path.exists(OSE_CSV_PATH):
         return set()
     try:
@@ -106,21 +142,62 @@ def get_radar_candidates(limit=35):
         print(f"Ziraat çarpanlar okuma hatası: {e}")
         return set()
 
-def load_seen_ids():
-    if os.path.exists(STATE_FILE):
+def load_existing_archive():
+    """Mevcut kap_haberler.csv dosyasını hafızaya yükler ve kimlik kümesi üretir."""
+    if not os.path.exists(KAP_CSV_OUTPUT):
+        return [], set()
+    try:
+        df = pd.read_csv(KAP_CSV_OUTPUT)
+        if df.empty or "Hisse" not in df.columns or "Baslik" not in df.columns:
+            return [], set()
+
+        # Kayıtları sözlük listesine dönüştür
+        arsiv_listesi = df.to_dict("records")
+        
+        # Benzersiz anahtar: "Hisse__Baslik"
+        hafiza_kumesi = {
+            f"{str(row.get('Hisse', '')).strip().upper()}__{str(row.get('Baslik', '')).strip().lower()}"
+            for row in arsiv_listesi
+        }
+        return arsiv_listesi, hafiza_kumesi
+    except Exception as e:
+        print(f"Arşiv okuma hatası: {e}")
+        return [], set()
+
+def parse_date_and_check(date_val):
+    cutoff = datetime.now() - timedelta(days=GUN_LIMITI)
+    dt = None
+
+    if isinstance(date_val, (int, float)):
+        dt = datetime.fromtimestamp(date_val)
+    elif isinstance(date_val, str):
+        date_str = date_val.strip()
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
+            dt = datetime.strptime(date_str, "%d.%m.%Y %H:%M")
         except Exception:
-            return set()
-    return set()
+            pass
+        if not dt:
+            try:
+                dt = datetime.strptime(date_str, "%d.%m.%Y")
+            except Exception:
+                pass
+        if not dt:
+            try:
+                dt = parsedate_to_datetime(date_str).replace(tzinfo=None)
+            except Exception:
+                pass
 
-def save_seen_ids(seen_ids):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(seen_ids)[-1000:], f, ensure_ascii=False, indent=2)
+    if dt and dt >= cutoff:
+        return True, dt.strftime("%d.%m.%Y %H:%M"), dt
+    return False, "", None
 
-def fetch_from_tradingview(session, hisse):
-    """TradingView Headlines API (client=web parametreli)"""
+def filtreye_uyuyor_mu(baslik, ozet):
+    metin = f"{baslik} {ozet}".lower()
+    if any(k in metin for k in KARA_LISTE):
+        return False
+    return any(k in metin for k in FILTRE_KELIMELER)
+
+def fetch_from_tradingview(session, hisse, hafiza_kumesi):
     url = f"https://news-headlines.tradingview.com/v2/headlines?client=web&lang=tr&symbol=BIST%3A{hisse}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -131,27 +208,38 @@ def fetch_from_tradingview(session, hisse):
         if res.status_code == 200:
             items = res.json().get("items", [])
             sonuclar = []
-            for it in items[:5]:
-                b_id = str(it.get("id") or "")
+            for it in items:
+                baslik = (it.get("title") or "KAP Bildirimi").strip()
+                
+                # HAFIZA KONTROLÜ: Zaten kayıtlıysa hiç uğraşma, atla
+                kimlik = f"{hisse.upper()}__{baslik.lower()}"
+                if kimlik in hafiza_kumesi:
+                    continue
+
                 pub_ts = it.get("published")
-                pub_str = datetime.fromtimestamp(pub_ts).strftime("%d.%m.%Y %H:%M") if pub_ts else datetime.now().strftime("%d.%m.%Y %H:%M")
+                gecerli, tarih_str, _ = parse_date_and_check(pub_ts)
+                if not gecerli:
+                    continue
+
+                ozet = (it.get("shortDescription") or baslik).strip()
+                if not filtreye_uyuyor_mu(baslik, ozet):
+                    continue
+
                 link = it.get("link") or (f"https://www.tradingview.com{it.get('storyPath')}" if it.get("storyPath") else "")
                 sonuclar.append({
-                    "id": b_id,
-                    "symbol": hisse,
-                    "title": it.get("title") or "KAP Bildirimi",
-                    "date": pub_str,
-                    "summary": it.get("shortDescription") or it.get("title") or "",
-                    "link": link
+                    "Hisse": hisse,
+                    "Tarih": tarih_str,
+                    "Baslik": baslik,
+                    "Ozet": ozet,
+                    "KAP_Linki": link
                 })
             return sonuclar
     except Exception:
         pass
     return []
 
-def fetch_from_google_rss(session, hisse):
-    """Bulut sunucularını engellemeyen Google Finans & KAP RSS beslemesi"""
-    url = f"https://news.google.com/rss/search?q={hisse}+KAP+borsa&hl=tr&gl=TR&ceid=TR:tr"
+def fetch_from_google_rss(session, hisse, hafiza_kumesi):
+    url = f"https://news.google.com/rss/search?q={hisse}+kap+bildirimi&hl=tr&gl=TR&ceid=TR:tr"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
     }
@@ -160,110 +248,94 @@ def fetch_from_google_rss(session, hisse):
         if res.status_code == 200:
             root = ET.fromstring(res.content)
             sonuclar = []
-            for item in root.findall(".//item")[:5]:
-                title = item.findtext("title") or ""
-                link = item.findtext("link") or ""
-                pub_date = item.findtext("pubDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
+            for item in root.findall(".//item"):
+                title = (item.findtext("title") or "").strip()
                 
-                # Başlıktan ID türetme
-                b_id = str(abs(hash(title)))[:10]
+                # HAFIZA KONTROLÜ: Zaten kayıtlıysa atla
+                kimlik = f"{hisse.upper()}__{title.lower()}"
+                if kimlik in hafiza_kumesi:
+                    continue
+
+                pub_date = item.findtext("pubDate") or ""
+                gecerli, tarih_str, _ = parse_date_and_check(pub_date)
+                if not gecerli:
+                    continue
+
+                if not filtreye_uyuyor_mu(title, title):
+                    continue
+
+                link = item.findtext("link") or ""
                 sonuclar.append({
-                    "id": b_id,
-                    "symbol": hisse,
-                    "title": title,
-                    "date": pub_date[:16] if len(pub_date) > 16 else pub_date,
-                    "summary": title,
-                    "link": link
+                    "Hisse": hisse,
+                    "Tarih": tarih_str,
+                    "Baslik": title,
+                    "Ozet": title,
+                    "KAP_Linki": link
                 })
             return sonuclar
     except Exception:
         pass
     return []
 
-def fetch_company_disclosures(hisse):
+def fetch_company_disclosures(hisse, hafiza_kumesi):
     session = requests.Session()
-    # Önce TradingView dene, boşsa Google RSS'ten çek
-    veriler = fetch_from_tradingview(session, hisse)
+    veriler = fetch_from_tradingview(session, hisse, hafiza_kumesi)
     if not veriler:
-        veriler = fetch_from_google_rss(session, hisse)
+        veriler = fetch_from_google_rss(session, hisse, hafiza_kumesi)
     return hisse, veriler
 
-def send_to_make(payload):
-    if not MAKE_WEBHOOK_URL:
-        return False
-    try:
-        res = requests.post(MAKE_WEBHOOK_URL, json=payload, timeout=12)
-        return res.status_code == 200
-    except Exception:
-        return False
-
-def filtreye_uyuyor_mu(baslik, ozet):
-    birlesik = f"{baslik} {ozet}".lower()
-    return any(k in birlesik for k in FILTRE_KELIMELER)
-
 def main():
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Hibrit KAP Taraması Başlatıldı.")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Hafızalı KAP Taraması Başlatıldı.")
 
+    # 1. Mevcut Hafızayı Yükle
+    mevcut_arsiv, hafiza_kumesi = load_existing_archive()
+    print(f"Hafızadaki Mevcut Haber Sayısı: {len(mevcut_arsiv)}")
+
+    # 2. Takip Listesi (Portföy + İlk 150 Radar Adayı + AKSA)
     aciklar = get_open_positions()
-    radar_liderleri = get_radar_candidates(limit=35)
+    radar_liderleri = get_radar_candidates(limit=150)
     tum_takip = aciklar.union(radar_liderleri).union({"AKSA"})
 
-    print(f"Toplam Takip Edilen Hisse Sayısı: {len(tum_takip)}")
-    print(f"Hisseler: {', '.join(sorted(tum_takip))}")
+    print(f"Toplam Taranacak Hisse Sayısı: {len(tum_takip)}")
 
-    seen_ids = load_seen_ids()
-    yeni_bildirim_sayisi = 0
-    pbi_haber_listesi = []
+    yeni_haberler = []
 
-    # Paralel çekim
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        gelecek_sonuclar = {executor.submit(fetch_company_disclosures, h): h for h in tum_takip}
+    # 3. Paralel Tarama (Hafızada olanlar anında elenir)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        gelecek_sonuclar = {executor.submit(fetch_company_disclosures, h, hafiza_kumesi): h for h in tum_takip}
         for future in as_completed(gelecek_sonuclar):
-            hisse, bildirimler = future.result()
-            for item in bildirimler:
-                b_id = item["id"]
-                sembol = item["symbol"]
-                baslik = item["title"]
-                zaman = item["date"]
-                ozet = item["summary"]
-                link = item["link"]
+            _, bildirimler = future.result()
+            if bildirimler:
+                for b in bildirimler:
+                    # Yeni gelen haberi anlık hafızaya da kaydet (çift eklenmesin)
+                    k = f"{b['Hisse'].upper()}__{b['Baslik'].lower()}"
+                    if k not in hafiza_kumesi:
+                        hafiza_kumesi.add(k)
+                        yeni_haberler.append(b)
 
-                # Power BI için kaydet
-                pbi_haber_listesi.append({
-                    "Hisse": sembol,
-                    "Tarih": zaman,
-                    "Baslik": baslik,
-                    "Ozet": ozet,
-                    "KAP_Linki": link
-                })
+    print(f"Tarama Tamamlandı. Tespit Edilen YENİ Haber Sayısı: {len(yeni_haberler)}")
 
-                # Telegram Webhook (Yeni ve kritik olanlar)
-                if b_id and b_id not in seen_ids:
-                    if filtreye_uyuyor_mu(baslik, ozet):
-                        payload = {
-                            "sembol": sembol,
-                            "baslik": baslik,
-                            "zaman": zaman,
-                            "kap_link": link,
-                            "ozet": ozet
-                        }
-                        if send_to_make(payload):
-                            seen_ids.add(b_id)
-                            yeni_bildirim_sayisi += 1
-                    else:
-                        seen_ids.add(b_id)
+    # 4. Arşiv ile Yeni Haberleri Birleştir
+    toplam_liste = mevcut_arsiv + yeni_haberler
 
-    # Power BI CSV çıktısı
-    if pbi_haber_listesi:
-        df_pbi = pd.DataFrame(pbi_haber_listesi).drop_duplicates(subset=["Hisse", "Baslik"])
+    if toplam_liste:
+        df_pbi = pd.DataFrame(toplam_liste).drop_duplicates(subset=["Hisse", "Baslik"])
+        
+        # Tarih formatını parse edip 10 günden eskiyenleri arşivden temizleme
+        df_pbi["Tarih_DT"] = pd.to_datetime(df_pbi["Tarih"], format="%d.%m.%Y %H:%M", errors="coerce")
+        
+        # Son 10 gün sınırından eski olanları dosyadan düşür (Dosya şişmesini önler)
+        zaman_esigi = datetime.now() - timedelta(days=GUN_LIMITI)
+        df_pbi = df_pbi[(df_pbi["Tarih_DT"] >= zaman_esigi) | (df_pbi["Tarih_DT"].isna())]
+        
+        # En yeniden eskiye sırala
+        df_pbi = df_pbi.sort_values(by="Tarih_DT", ascending=False).drop(columns=["Tarih_DT"])
     else:
         df_pbi = pd.DataFrame(columns=["Hisse", "Tarih", "Baslik", "Ozet", "KAP_Linki"])
 
+    # 5. Güncellenmiş Dosyayı Kaydet
     df_pbi.to_csv(KAP_CSV_OUTPUT, index=False, encoding="utf-8-sig")
-    print(f"[Power BI] {len(df_pbi)} adet haber '{KAP_CSV_OUTPUT}' dosyasına başarıyla yazıldı.")
-
-    save_seen_ids(seen_ids)
-    print(f"Tarama bitti. {yeni_bildirim_sayisi} kritik bildirim Telegram'a fırlatıldı.")
+    print(f"[Power BI] Toplam {len(df_pbi)} adet güncel haber '{KAP_CSV_OUTPUT}' dosyasında saklanıyor.")
 
 if __name__ == "__main__":
     main()
