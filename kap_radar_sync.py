@@ -5,6 +5,7 @@ import time
 import requests
 import pandas as pd
 from datetime import datetime
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==========================================
@@ -41,7 +42,8 @@ FILTRE_KELIMELER = [
     "özel durum açıklaması",
     "yatırım",
     "birleşme",
-    "devralma"
+    "devralma",
+    "kap"
 ]
 
 def download_excel_file(url):
@@ -63,7 +65,6 @@ def download_excel_file(url):
     return None
 
 def get_open_positions():
-    """OneDrive Excel'den durumu AÇIK olan hisseleri çeker."""
     try:
         content = download_excel_file(ONEDRIVE_EXCEL_URL)
         if not content:
@@ -91,7 +92,6 @@ def get_open_positions():
         return set()
 
 def get_radar_candidates(limit=35):
-    """Ziraat tablosundan veto yememiş en yüksek puanlı hisseleri alır."""
     if not os.path.exists(OSE_CSV_PATH):
         return set()
     try:
@@ -119,44 +119,19 @@ def save_seen_ids(seen_ids):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen_ids)[-1000:], f, ensure_ascii=False, indent=2)
 
-def fetch_from_bigpara(session, hisse):
-    url = f"https://bigpara.hurriyet.com.tr/api/v1/hisse/kaphaberleri/{hisse}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://bigpara.hurriyet.com.tr/"
-    }
-    try:
-        res = session.get(url, headers=headers, timeout=8)
-        if res.status_code == 200:
-            data = res.json()
-            raw_list = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            sonuclar = []
-            for d in raw_list:
-                b_id = str(d.get("id") or d.get("disclosureIndex") or "")
-                if not b_id:
-                    continue
-                sonuclar.append({
-                    "id": b_id,
-                    "symbol": hisse,
-                    "title": d.get("title") or d.get("baslik") or "KAP Bildirimi",
-                    "date": d.get("date") or d.get("tarih") or datetime.now().strftime("%d.%m.%Y %H:%M"),
-                    "summary": d.get("spot") or d.get("ozet") or d.get("title") or "",
-                    "link": d.get("url") or f"https://www.kap.org.tr/tr/Bildirim/{b_id}"
-                })
-            return sonuclar
-    except Exception:
-        pass
-    return []
-
 def fetch_from_tradingview(session, hisse):
-    url = f"https://news-headlines.tradingview.com/v2/headlines?lang=tr&symbol=BIST%3A{hisse}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36"}
+    """TradingView Headlines API (client=web parametreli)"""
+    url = f"https://news-headlines.tradingview.com/v2/headlines?client=web&lang=tr&symbol=BIST%3A{hisse}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.tradingview.com/"
+    }
     try:
         res = session.get(url, headers=headers, timeout=8)
         if res.status_code == 200:
             items = res.json().get("items", [])
             sonuclar = []
-            for it in items:
+            for it in items[:5]:
                 b_id = str(it.get("id") or "")
                 pub_ts = it.get("published")
                 pub_str = datetime.fromtimestamp(pub_ts).strftime("%d.%m.%Y %H:%M") if pub_ts else datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -174,11 +149,43 @@ def fetch_from_tradingview(session, hisse):
         pass
     return []
 
+def fetch_from_google_rss(session, hisse):
+    """Bulut sunucularını engellemeyen Google Finans & KAP RSS beslemesi"""
+    url = f"https://news.google.com/rss/search?q={hisse}+KAP+borsa&hl=tr&gl=TR&ceid=TR:tr"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
+    }
+    try:
+        res = session.get(url, headers=headers, timeout=8)
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            sonuclar = []
+            for item in root.findall(".//item")[:5]:
+                title = item.findtext("title") or ""
+                link = item.findtext("link") or ""
+                pub_date = item.findtext("pubDate") or datetime.now().strftime("%d.%m.%Y %H:%M")
+                
+                # Başlıktan ID türetme
+                b_id = str(abs(hash(title)))[:10]
+                sonuclar.append({
+                    "id": b_id,
+                    "symbol": hisse,
+                    "title": title,
+                    "date": pub_date[:16] if len(pub_date) > 16 else pub_date,
+                    "summary": title,
+                    "link": link
+                })
+            return sonuclar
+    except Exception:
+        pass
+    return []
+
 def fetch_company_disclosures(hisse):
     session = requests.Session()
-    veriler = fetch_from_bigpara(session, hisse)
+    # Önce TradingView dene, boşsa Google RSS'ten çek
+    veriler = fetch_from_tradingview(session, hisse)
     if not veriler:
-        veriler = fetch_from_tradingview(session, hisse)
+        veriler = fetch_from_google_rss(session, hisse)
     return hisse, veriler
 
 def send_to_make(payload):
@@ -195,14 +202,10 @@ def filtreye_uyuyor_mu(baslik, ozet):
     return any(k in birlesik for k in FILTRE_KELIMELER)
 
 def main():
-    start_time = datetime.now()
-    print(f"[{start_time.strftime('%Y-%m-%d %H:%M:%S')}] Paralel KAP Taraması Başlatıldı.")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Hibrit KAP Taraması Başlatıldı.")
 
-    # 1. Taranacak Hisseler (Açık Pozisyonlar + Radar Liderleri + AKSA)
     aciklar = get_open_positions()
     radar_liderleri = get_radar_candidates(limit=35)
-    
-    # Test ettiğiniz hisse ve açık portföy her zaman havuzda yer alır
     tum_takip = aciklar.union(radar_liderleri).union({"AKSA"})
 
     print(f"Toplam Takip Edilen Hisse Sayısı: {len(tum_takip)}")
@@ -212,8 +215,8 @@ def main():
     yeni_bildirim_sayisi = 0
     pbi_haber_listesi = []
 
-    # 2. Paralel Tarama (Tüm hisseleri 4-5 saniyede çeker)
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    # Paralel çekim
+    with ThreadPoolExecutor(max_workers=6) as executor:
         gelecek_sonuclar = {executor.submit(fetch_company_disclosures, h): h for h in tum_takip}
         for future in as_completed(gelecek_sonuclar):
             hisse, bildirimler = future.result()
@@ -225,7 +228,7 @@ def main():
                 ozet = item["summary"]
                 link = item["link"]
 
-                # A) Power BI için: Filtreye bakılmaksızın tüm son bildirimler eklenir
+                # Power BI için kaydet
                 pbi_haber_listesi.append({
                     "Hisse": sembol,
                     "Tarih": zaman,
@@ -234,7 +237,7 @@ def main():
                     "KAP_Linki": link
                 })
 
-                # B) Telegram için: Yalnızca yeni VE kritik kelime eşleşmesi olanlar gönderilir
+                # Telegram Webhook (Yeni ve kritik olanlar)
                 if b_id and b_id not in seen_ids:
                     if filtreye_uyuyor_mu(baslik, ozet):
                         payload = {
@@ -250,7 +253,7 @@ def main():
                     else:
                         seen_ids.add(b_id)
 
-    # 3. Power BI CSV Dosyasını Kaydet
+    # Power BI CSV çıktısı
     if pbi_haber_listesi:
         df_pbi = pd.DataFrame(pbi_haber_listesi).drop_duplicates(subset=["Hisse", "Baslik"])
     else:
@@ -260,7 +263,7 @@ def main():
     print(f"[Power BI] {len(df_pbi)} adet haber '{KAP_CSV_OUTPUT}' dosyasına başarıyla yazıldı.")
 
     save_seen_ids(seen_ids)
-    print(f"Tarama bitti. {yeni_bildirim_sayisi} yeni kritik bildirim Telegram'a fırlatıldı.")
+    print(f"Tarama bitti. {yeni_bildirim_sayisi} kritik bildirim Telegram'a fırlatıldı.")
 
 if __name__ == "__main__":
     main()
