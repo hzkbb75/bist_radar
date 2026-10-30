@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import time
 import requests
 import pandas as pd
@@ -9,13 +10,14 @@ from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==========================================
-# AYARLAR (POWER BI HAFIZALI MOTOR)
+# AYARLAR (POWER BI + OPENAI MOTORU)
 # ==========================================
 ONEDRIVE_EXCEL_URL = (
     os.getenv("ONEDRIVE_EXCEL_URL") 
     or "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
 )
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OSE_CSV_PATH = "ziraat_carpanlar.csv"
 KAP_CSV_OUTPUT = "kap_haberler.csv"
 
@@ -143,7 +145,7 @@ def get_radar_candidates(limit=150):
         return set()
 
 def load_existing_archive():
-    """Mevcut kap_haberler.csv dosyasını hafızaya yükler ve kimlik kümesi üretir."""
+    """Mevcut arşivi okur ve kara listedekileri temizleyerek yükler."""
     if not os.path.exists(KAP_CSV_OUTPUT):
         return [], set()
     try:
@@ -151,15 +153,32 @@ def load_existing_archive():
         if df.empty or "Hisse" not in df.columns or "Baslik" not in df.columns:
             return [], set()
 
-        # Kayıtları sözlük listesine dönüştür
-        arsiv_listesi = df.to_dict("records")
-        
-        # Benzersiz anahtar: "Hisse__Baslik"
-        hafiza_kumesi = {
-            f"{str(row.get('Hisse', '')).strip().upper()}__{str(row.get('Baslik', '')).strip().lower()}"
-            for row in arsiv_listesi
-        }
-        return arsiv_listesi, hafiza_kumesi
+        temiz_arsiv = []
+        hafiza_kumesi = set()
+
+        for row in df.to_dict("records"):
+            baslik = str(row.get("Baslik", ""))
+            ozet = str(row.get("Ozet", ""))
+            tarih = row.get("Tarih", "")
+
+            gecerli_tarih, _, _ = parse_date_and_check(tarih)
+            if not gecerli_tarih:
+                continue
+
+            if not filtreye_uyuyor_mu(baslik, ozet):
+                continue
+
+            # Eğer eski kayıtlarda Etki/Yorum yoksa varsayılan ata
+            if "Etki" not in row or pd.isna(row["Etki"]):
+                row["Etki"] = "⚪ Nötr"
+            if "Yorum" not in row or pd.isna(row["Yorum"]):
+                row["Yorum"] = "Önceden arşivlenmiş bildirim."
+
+            temiz_arsiv.append(row)
+            kimlik = f"{str(row.get('Hisse', '')).strip().upper()}__{baslik.strip().lower()}"
+            hafiza_kumesi.add(kimlik)
+
+        return temiz_arsiv, hafiza_kumesi
     except Exception as e:
         print(f"Arşiv okuma hatası: {e}")
         return [], set()
@@ -197,6 +216,54 @@ def filtreye_uyuyor_mu(baslik, ozet):
         return False
     return any(k in metin for k in FILTRE_KELIMELER)
 
+def ai_haberi_yorumla(hisse, baslik, ozet):
+    """OpenAI gpt-4o-mini ile haberi analiz eder ve etki ile 1-2 cümlelik yorum döner."""
+    if not OPENAI_API_KEY:
+        return "⚪ Nötr", "API anahtarı tanımlanmamış."
+
+    prompt = f"""Sen deneyimli bir Borsa İstanbul (BIST) hisse senedi ve temel analiz uzmanısın.
+Aşağıda verilen KAP şirket bildirimini şirketin finansal sağlığı, kârlılığı, nakit akışı veya piyasa algısı açısından değerlendir.
+
+Hisse: {hisse}
+Başlık: {baslik}
+Özet/Detay: {ozet}
+
+GÖREVİN:
+1. Şirket için genel etkiyi belirle: Yalnızca şu 3 ifadeden birini seç: "🟢 Pozitif", "🔴 Negatif", "⚪ Nötr"
+2. Maksimum 1-2 cümlelik, gereksiz laf kalabalığı olmayan, profesyonel temel analiz yorumu yaz (Örn: ciro katkısı, sulanma riski, likidite baskısı vb.).
+
+SADECE geçerli bir JSON objesi olarak şu formatta yanıt ver:
+{{"etki": "🟢 Pozitif", "yorum": "Kısa analizin buraya gelecek."}}
+"""
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "Yalnızca istenen JSON formatında yanıt veren bir borsa analistisin."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=12)
+        if res.status_code == 200:
+            data = res.json()
+            icerik = json.loads(data["choices"][0]["message"]["content"])
+            etki = icerik.get("etki", "⚪ Nötr")
+            yorum = icerik.get("yorum", "Yorum üretilemedi.")
+            return etki, yorum
+        else:
+            return "⚪ Nötr", f"API Hatası: {res.status_code}"
+    except Exception as e:
+        return "⚪ Nötr", "Analiz sırasında bağlantı hatası."
+
 def fetch_from_tradingview(session, hisse, hafiza_kumesi):
     url = f"https://news-headlines.tradingview.com/v2/headlines?client=web&lang=tr&symbol=BIST%3A{hisse}"
     headers = {
@@ -210,8 +277,6 @@ def fetch_from_tradingview(session, hisse, hafiza_kumesi):
             sonuclar = []
             for it in items:
                 baslik = (it.get("title") or "KAP Bildirimi").strip()
-                
-                # HAFIZA KONTROLÜ: Zaten kayıtlıysa hiç uğraşma, atla
                 kimlik = f"{hisse.upper()}__{baslik.lower()}"
                 if kimlik in hafiza_kumesi:
                     continue
@@ -250,8 +315,6 @@ def fetch_from_google_rss(session, hisse, hafiza_kumesi):
             sonuclar = []
             for item in root.findall(".//item"):
                 title = (item.findtext("title") or "").strip()
-                
-                # HAFIZA KONTROLÜ: Zaten kayıtlıysa atla
                 kimlik = f"{hisse.upper()}__{title.lower()}"
                 if kimlik in hafiza_kumesi:
                     continue
@@ -285,57 +348,70 @@ def fetch_company_disclosures(hisse, hafiza_kumesi):
     return hisse, veriler
 
 def main():
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Hafızalı KAP Taraması Başlatıldı.")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] OpenAI Destekli KAP Radar Taraması Başlatıldı.")
 
     # 1. Mevcut Hafızayı Yükle
     mevcut_arsiv, hafiza_kumesi = load_existing_archive()
-    print(f"Hafızadaki Mevcut Haber Sayısı: {len(mevcut_arsiv)}")
+    print(f"Hafızadaki Temiz Haber Sayısı: {len(mevcut_arsiv)}")
 
-    # 2. Takip Listesi (Portföy + İlk 150 Radar Adayı + AKSA)
+    # 2. Takip Listesi (Portföy + İlk 150 Radar Adayı)
     aciklar = get_open_positions()
     radar_liderleri = get_radar_candidates(limit=150)
     tum_takip = aciklar.union(radar_liderleri).union({"AKSA"})
 
     print(f"Toplam Taranacak Hisse Sayısı: {len(tum_takip)}")
 
-    yeni_haberler = []
+    yakalanan_yeniler = []
 
-    # 3. Paralel Tarama (Hafızada olanlar anında elenir)
+    # 3. Paralel Tarama
     with ThreadPoolExecutor(max_workers=10) as executor:
         gelecek_sonuclar = {executor.submit(fetch_company_disclosures, h, hafiza_kumesi): h for h in tum_takip}
         for future in as_completed(gelecek_sonuclar):
             _, bildirimler = future.result()
             if bildirimler:
                 for b in bildirimler:
-                    # Yeni gelen haberi anlık hafızaya da kaydet (çift eklenmesin)
                     k = f"{b['Hisse'].upper()}__{b['Baslik'].lower()}"
                     if k not in hafiza_kumesi:
                         hafiza_kumesi.add(k)
-                        yeni_haberler.append(b)
+                        yakalanan_yeniler.append(b)
 
-    print(f"Tarama Tamamlandı. Tespit Edilen YENİ Haber Sayısı: {len(yeni_haberler)}")
+    print(f"Tarama Bitti. Yeni Bulunan Haber Sayısı: {len(yakalanan_yeniler)}")
 
-    # 4. Arşiv ile Yeni Haberleri Birleştir
-    toplam_liste = mevcut_arsiv + yeni_haberler
+    # 4. Yalnızca Yeni Haberleri OpenAI ile Yorumla
+    if yakalanan_yeniler and OPENAI_API_KEY:
+        print("Yeni haberler OpenAI (gpt-4o-mini) ile analiz ediliyor...")
+        for h_item in yakalanan_yeniler:
+            etki, yorum = ai_haberi_yorumla(h_item["Hisse"], h_item["Baslik"], h_item["Ozet"])
+            h_item["Etki"] = etki
+            h_item["Yorum"] = yorum
+            print(f"  -> [{h_item['Hisse']}] {etki}: {yorum[:50]}...")
+            time.sleep(0.3)
+    else:
+        for h_item in yakalanan_yeniler:
+            h_item["Etki"] = "⚪ Nötr"
+            h_item["Yorum"] = "Analiz edilmedi."
+
+    # 5. Birleştirme ve Kayıt
+    toplam_liste = mevcut_arsiv + yakalanan_yeniler
 
     if toplam_liste:
         df_pbi = pd.DataFrame(toplam_liste).drop_duplicates(subset=["Hisse", "Baslik"])
-        
-        # Tarih formatını parse edip 10 günden eskiyenleri arşivden temizleme
         df_pbi["Tarih_DT"] = pd.to_datetime(df_pbi["Tarih"], format="%d.%m.%Y %H:%M", errors="coerce")
         
-        # Son 10 gün sınırından eski olanları dosyadan düşür (Dosya şişmesini önler)
+        # 10 günden eski olanları arşivden temizle
         zaman_esigi = datetime.now() - timedelta(days=GUN_LIMITI)
         df_pbi = df_pbi[(df_pbi["Tarih_DT"] >= zaman_esigi) | (df_pbi["Tarih_DT"].isna())]
         
-        # En yeniden eskiye sırala
         df_pbi = df_pbi.sort_values(by="Tarih_DT", ascending=False).drop(columns=["Tarih_DT"])
     else:
-        df_pbi = pd.DataFrame(columns=["Hisse", "Tarih", "Baslik", "Ozet", "KAP_Linki"])
+        df_pbi = pd.DataFrame(columns=["Hisse", "Tarih", "Baslik", "Ozet", "Etki", "Yorum", "KAP_Linki"])
 
-    # 5. Güncellenmiş Dosyayı Kaydet
+    # Power BI için sütun sıralamasını düzenle
+    kolonlar = [c for c in ["Hisse", "Tarih", "Etki", "Baslik", "Yorum", "Ozet", "KAP_Linki"] if c in df_pbi.columns]
+    df_pbi = df_pbi[kolonlar]
+
     df_pbi.to_csv(KAP_CSV_OUTPUT, index=False, encoding="utf-8-sig")
-    print(f"[Power BI] Toplam {len(df_pbi)} adet güncel haber '{KAP_CSV_OUTPUT}' dosyasında saklanıyor.")
+    print(f"[Power BI] Toplam {len(df_pbi)} adet haber '{KAP_CSV_OUTPUT}' dosyasına güncellendi.")
 
 if __name__ == "__main__":
     main()
