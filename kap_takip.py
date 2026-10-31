@@ -13,9 +13,9 @@ MAKE_WEBHOOK_URL = (
     os.getenv("MAKE_WEBHOOK_URL") 
     or "https://hook.eu1.make.com/w2bw4cexf24z4huxs3nikopnofif1t1j"
 )
-ONEDRIVE_EXCEL_URL = (
-    os.getenv("ONEDRIVE_EXCEL_URL") 
-    or "https://1drv.ms/x/c/cb9e9d1c772ef382/IQD2WvVMDCAOSJKa6ur72EdJAQ8UWGwRYYQ-zFsJO2pbYOw?e=Obf4U8"
+GOOGLE_SHEETS_URL = (
+    os.getenv("GOOGLE_SHEETS_URL") 
+    or "https://docs.google.com/spreadsheets/d/e/2PACX-1vQCQiyLPGlz0tNzCnh7AS3GJsNtPEr96bQvNJ7-JwUl0CFDbbIyiiXUnGx03W4Ac6wBgSBItFREm82d/pubhtml"
 )
 STATE_FILE = "son_bildirimler.json"
 
